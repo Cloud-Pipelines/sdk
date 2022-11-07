@@ -2,70 +2,95 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
-from typing import Callable
+from typing import Dict, Mapping
 
 from ...components import structures
 from ..._components.components._components import _resolve_command_line_and_paths
 
+from .. import artifact_stores
+from . import interfaces
 from .naming_utils import sanitize_file_name
 
 
-class LocalEnvironmentLauncher:
+class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
     def launch_container_task(
         self,
-        task_spec,
-        download: Callable[[str], str],
-        upload: Callable[[str], str],
-        input_uris_map: dict = None,
-        output_uris_map: dict = None,
-    ):
-        input_uris_map = input_uris_map or {}
-        output_uris_map = output_uris_map or {}
+        task_spec: structures.TaskSpec,
+        artifact_store: artifact_stores.ArtifactStore,
+        input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
+    ) -> Dict[str, artifact_stores.Artifact]:
+        component_ref: structures.ComponentReference = task_spec.component_ref
+        component_spec: structures.ComponentSpec = component_ref.spec
+        container_spec: structures.ContainerSpec = (
+            component_spec.implementation.container
+        )
+
+        input_artifacts = input_artifacts or {}
+
+        input_names = list(input.name for input in component_spec.inputs or [])
+        output_names = list(output.name for output in component_spec.outputs or [])
 
         with tempfile.TemporaryDirectory() as tempdir:
             host_workdir = os.path.join(tempdir, "work")
             # host_logdir = os.path.join(tempdir, 'logs')
             host_input_paths_map = {
                 name: os.path.join(tempdir, "inputs", sanitize_file_name(name), "data")
-                for name in input_uris_map.keys()
+                for name in input_names
             }  # Or just use random temp dirs/subdirs
             host_output_paths_map = {
                 name: os.path.join(tempdir, "outputs", sanitize_file_name(name), "data")
-                for name in output_uris_map.keys()
+                for name in output_names
             }  # Or just use random temp dirs/subdirs
 
             Path(host_workdir).mkdir(parents=True, exist_ok=True)
 
-            # Getting input data
-            for input_name, input_uri in input_uris_map.items():
-                input_host_path = host_input_paths_map[input_name]
-                Path(input_host_path).parent.mkdir(parents=True, exist_ok=True)
-                download(input_uri, input_host_path)
-
-            for output_host_path in host_output_paths_map.values():
-                Path(output_host_path).parent.mkdir(parents=True, exist_ok=True)
-
-            component_spec = task_spec.component_ref.spec
+            # Getting artifact values when needed
+            # Design options: We could download/mount all artifacts and optionally read from local files,
+            # but mounting can be more expensive compared to downloading.
+            def artifact_value_getter(
+                value: artifact_stores.Artifact, input_type
+            ) -> str:
+                assert isinstance(value, artifact_stores.Artifact)
+                return value.read_text()
 
             resolved_cmd = _resolve_command_line_and_paths(
                 component_spec=component_spec,
-                arguments=task_spec.arguments,
+                arguments=input_artifacts,
                 input_path_generator=host_input_paths_map.get,
                 output_path_generator=host_output_paths_map.get,
+                argument_serializer=artifact_value_getter,
             )
 
+            # Getting the input data
+            for input_name in resolved_cmd.input_paths.keys():
+                input_host_path = host_input_paths_map[input_name]
+                input_artifact = input_artifacts[input_name]
+                Path(input_host_path).parent.mkdir(parents=True, exist_ok=True)
+                input_artifact.download(path=input_host_path)
+
+            # Preparing the output locations
+            for output_host_path in host_output_paths_map.values():
+                Path(output_host_path).parent.mkdir(parents=True, exist_ok=True)
+
             process_env = os.environ.copy()
-            process_env.update(component_spec.implementation.container.env or {})
+            process_env.update(container_spec.env or {})
 
             res = subprocess.run(
                 args=resolved_cmd.command + resolved_cmd.args,
                 env=process_env,
                 cwd=host_workdir,
+                # Write STDERR to the same stream as STDOUT
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
+            print("Logs:")
+            print(res.stdout)
 
             # Storing the output data
-            for output_name, output_uri in output_uris_map.items():
+            output_artifacts = {}
+            for output_name in output_names:
                 output_host_path = host_output_paths_map[output_name]
-                upload(output_host_path, output_uri)
+                artifact = artifact_store.upload(path=output_host_path)
+                output_artifacts[output_name] = artifact
 
-            # print(res)
+            return output_artifacts
