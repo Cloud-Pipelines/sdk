@@ -26,7 +26,7 @@ from cloud_pipelines.orchestration.artifact_stores.local_artifact_store import (
 )
 
 
-def _build_data_passing_pipeline_task():
+def _build_data_passing_graph_component():
     # Components - Produce
     @components.create_component_from_func
     def produce_value() -> str:
@@ -87,43 +87,75 @@ def _build_data_passing_pipeline_task():
         dir1 = produce_dir().output
         consume_as_dir(data=dir1)
 
-    pipeline_op = components.create_graph_component_from_pipeline_func(pipeline3_func)
-    return pipeline_op(graph_input_1="graph_input_1")
+        return dict(
+            output_1=data1,
+            output_2=data2,
+            output_3=dir1,
+        )
+
+    return components.create_graph_component_from_pipeline_func(pipeline3_func)
+
+
+def _build_data_passing_pipeline_task():
+    data_passing_op = _build_data_passing_graph_component()
+    return data_passing_op(graph_input_1="graph_input_1")
+
+
+def _build_nested_graph_component():
+    pipeline_op = _build_data_passing_graph_component()
+
+    def nested_pipeline(outer_graph_input_1: str = "outer_graph_input_1_default"):
+        p1_task = pipeline_op(graph_input_1=outer_graph_input_1)
+        p2_task = pipeline_op(graph_input_1=p1_task.outputs["output_1"])
+
+        return dict(
+            output_1=p2_task.outputs["output_1"],
+        )
+
+    nested_pipeline_op = components.create_graph_component_from_pipeline_func(
+        nested_pipeline
+    )
+    return nested_pipeline_op
+
+
+def _build_nested_graph_pipeline_task():
+    nested_pipeline_op = _build_nested_graph_component()
+    return nested_pipeline_op(outer_graph_input_1="outer_graph_input_1")
 
 
 class LaunchersTestCase(unittest.TestCase):
     def test_local_environment_launcher(self):
-        pipeline_task = _build_data_passing_pipeline_task()
+        pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             artifact_store = LocalArtifactStore(root_dir=output_dir)
-            runners.run_container_tasks(
-                task_specs=pipeline_task.component_ref.spec.implementation.graph._toposorted_tasks,
-                graph_input_arguments=pipeline_task.arguments,
+            runners.run_task(
+                task_spec=pipeline_task,
+                input_arguments=pipeline_task.arguments,
                 task_launcher=LocalEnvironmentLauncher(),
                 artifact_store=artifact_store,
             )
 
     def test_local_docker_launcher(self):
-        pipeline_task = _build_data_passing_pipeline_task()
+        pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             artifact_store = LocalArtifactStore(root_dir=output_dir)
-            runners.run_container_tasks(
-                task_specs=pipeline_task.component_ref.spec.implementation.graph._toposorted_tasks,
-                graph_input_arguments=pipeline_task.arguments,
+            runners.run_task(
+                task_spec=pipeline_task,
+                input_arguments=pipeline_task.arguments,
                 task_launcher=DockerContainerLauncher(),
                 artifact_store=artifact_store,
             )
 
     def test_local_kubernetes_launcher(self):
-        pipeline_task = _build_data_passing_pipeline_task()
+        pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             artifact_store = LocalArtifactStore(root_dir=output_dir)
-            runners.run_container_tasks(
-                task_specs=pipeline_task.component_ref.spec.implementation.graph._toposorted_tasks,
-                graph_input_arguments=pipeline_task.arguments,
+            runners.run_task(
+                task_spec=pipeline_task,
+                input_arguments=pipeline_task.arguments,
                 task_launcher=LocalKubernetesContainerLauncher(),
                 artifact_store=artifact_store,
             )
