@@ -1,4 +1,6 @@
 import abc
+import dataclasses
+import datetime
 from typing import Dict, Mapping
 
 from ...components import structures
@@ -14,5 +16,15 @@ class ContainerTaskLauncher(abc.ABC):
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
-    ) -> Dict[str, artifact_stores.Artifact]:
+    ) -> "ContainerExecutionResult":
         raise NotImplementedError
+
+
+@dataclasses.dataclass
+class ContainerExecutionResult:
+    start_time: datetime.datetime
+    end_time: datetime.datetime
+    exit_code: int
+    # TODO: Replace with logs_artifact
+    logs: bytes
+    output_artifacts: Dict[str, artifact_stores.Artifact]

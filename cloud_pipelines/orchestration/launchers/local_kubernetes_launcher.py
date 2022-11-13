@@ -2,7 +2,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
-from typing import Dict, Mapping
+from typing import Dict, List, Mapping
 
 from kubernetes import config as k8s_config
 from kubernetes import client as k8s_client
@@ -47,7 +47,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
-    ) -> Dict[str, artifact_stores.Artifact]:
+    ) -> interfaces.ContainerExecutionResult:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         container_spec: structures.ContainerSpec = (
@@ -209,6 +209,9 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
                 spec=pod_spec,
             )
 
+            # Note: Need to reuse the k8s ApiClient.
+            # Otherwise doing `k8s_client.CoreV1Api().*` every time leads to warnings during unit tests:
+            # ResourceWarning: unclosed <ssl.SSLSocket fd=1056, family=AddressFamily.AF_INET, type=SocketKind.SOCK_STREAM, proto=0, laddr=('127.0.0.1', 56456), raddr=('127.0.0.1', 6443)>
             core_api = k8s_client.CoreV1Api(api_client=self._k8s_client)
             pod_res = core_api.create_namespaced_pod(
                 namespace=self._namespace,
@@ -222,18 +225,64 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
             wait_for_pod_to_stop_pending(
                 pod_name=pod_name, api_client=self._k8s_client, timeout_seconds=30
             )
-            wait_for_pod_to_succeed_or_fail(
+            pod = wait_for_pod_to_succeed_or_fail(
                 pod_name=pod_name, api_client=self._k8s_client
             )
+            if not pod:
+                raise NotImplementedError
+            pod_status: k8s_client.V1PodStatus = pod.status
+            container_statuses: List[
+                k8s_client.V1ContainerStatus
+            ] = pod_status.container_statuses
+            main_container_statuses = [
+                container_status
+                for container_status in container_statuses
+                if container_status.name == "main"
+            ]
+            if len(main_container_statuses) != 1:
+                raise RuntimeError(
+                    f"Cannot get the main container status form the pod: {pod}"
+                )
+            main_container_status = main_container_statuses[0]
+            main_container_state: k8s_client.V1ContainerState = (
+                main_container_status.state
+            )
+            main_container_terminated_state: k8s_client.V1ContainerStateTerminated = (
+                main_container_state.terminated
+            )
+            start_time = main_container_terminated_state.started_at
+            end_time = main_container_terminated_state.finished_at
+            exit_code = main_container_terminated_state.exit_code
+
+            logs: bytes = None
+            try:
+                logs = core_api.read_namespaced_pod_log(
+                    name=pod_res.metadata.name,
+                    namespace=pod_res.metadata.namespace,
+                    container="main",
+                    timestamps=False,
+                ).encode("utf-8")
+            except k8s_client.ApiException as e:
+                print(f"Exception while reading the logs: {e}")
 
             # Storing the output data
-            output_artifacts = {}
-            for output_name in output_names:
-                output_host_path = host_output_paths_map[output_name]
-                artifact = artifact_store.upload(path=output_host_path)
-                output_artifacts[output_name] = artifact
+            output_artifacts = None
+            succeeded = exit_code == 0
+            if succeeded:
+                output_artifacts = {}
+                for output_name in output_names:
+                    output_host_path = host_output_paths_map[output_name]
+                    artifact = artifact_store.upload(path=output_host_path)
+                    output_artifacts[output_name] = artifact
 
-            return output_artifacts
+            execution_result = interfaces.ContainerExecutionResult(
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+                logs=logs,
+                output_artifacts=output_artifacts,
+            )
+            return execution_result
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)
 

@@ -96,11 +96,13 @@ def run_task(
     }
 
     if isinstance(component_spec.implementation, structures.ContainerImplementation):
-        output_artifacts = task_launcher.launch_container_task(
+        container_execution_result = task_launcher.launch_container_task(
             task_spec=task_spec,
             input_artifacts=input_artifacts,
             artifact_store=artifact_store,
         )
+        output_artifacts = container_execution_result.output_artifacts
+        return output_artifacts
     elif isinstance(component_spec.implementation, structures.GraphImplementation):
         output_artifacts = _run_graph_task(
             task_spec=task_spec,

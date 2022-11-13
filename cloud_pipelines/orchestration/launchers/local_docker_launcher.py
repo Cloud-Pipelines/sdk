@@ -1,3 +1,4 @@
+import datetime
 import os
 from pathlib import Path, PurePosixPath
 import shutil
@@ -20,7 +21,7 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
-    ) -> Dict[str, artifact_stores.Artifact]:
+    ) -> interfaces.ContainerExecutionResult:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         container_spec: structures.ContainerSpec = (
@@ -109,25 +110,51 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
                 )
 
             docker_client = docker.from_env()
-            container_res = docker_client.containers.run(
+            start_time = datetime.datetime.utcnow()
+            container = docker_client.containers.run(
                 image=component_spec.implementation.container.image,
                 entrypoint=resolved_cmd.command,
                 command=resolved_cmd.args,
                 environment=container_env,
                 # remove=True,
                 volumes=volumes,
+                detach=True,
             )
+            log_generator = container.logs(
+                stdout=True, stderr=True, stream=True, follow=True
+            )
+            log_lines = []
+            for log_line in log_generator:
+                log_lines.append(log_line)
+                print(log_line)
+            wait_result = container.wait()
+            end_time = datetime.datetime.utcnow()
+
+            exit_status = wait_result["StatusCode"]
+            # logs_bytes = container.logs(stdout=True, stderr=True, stream=False)
+            logs_bytes = b"".join([line for line in log_lines])
 
             print("Container logs:")
-            print(container_res)
+            print(logs_bytes)
 
             # Storing the output data
-            output_artifacts = {}
-            for output_name in output_names:
-                output_host_path = host_output_paths_map[output_name]
-                artifact = artifact_store.upload(path=output_host_path)
-                output_artifacts[output_name] = artifact
+            output_artifacts = None
+            succeeded = exit_status == 0
+            if succeeded:
+                output_artifacts = {}
+                for output_name in output_names:
+                    output_host_path = host_output_paths_map[output_name]
+                    artifact = artifact_store.upload(path=output_host_path)
+                    output_artifacts[output_name] = artifact
 
-            return output_artifacts
+            execution_result = interfaces.ContainerExecutionResult(
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_status,
+                logs=logs_bytes,
+                output_artifacts=output_artifacts,
+            )
+
+            return execution_result
         finally:
             shutil.rmtree(tempdir, ignore_errors=True)

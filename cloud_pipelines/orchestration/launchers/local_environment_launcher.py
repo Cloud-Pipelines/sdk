@@ -1,3 +1,4 @@
+import datetime
 import os
 from pathlib import Path
 import subprocess
@@ -18,7 +19,7 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
-    ) -> Dict[str, artifact_stores.Artifact]:
+    ) -> interfaces.ContainerExecutionResult:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         container_spec: structures.ContainerSpec = (
@@ -75,6 +76,7 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             process_env = os.environ.copy()
             process_env.update(container_spec.env or {})
 
+            start_time = datetime.datetime.utcnow()
             res = subprocess.run(
                 args=resolved_cmd.command + resolved_cmd.args,
                 env=process_env,
@@ -83,14 +85,29 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
+            end_time = datetime.datetime.utcnow()
+            logs = res.stdout
+            exit_code = res.returncode
+
             print("Logs:")
-            print(res.stdout)
+            print(logs)
 
             # Storing the output data
-            output_artifacts = {}
-            for output_name in output_names:
-                output_host_path = host_output_paths_map[output_name]
-                artifact = artifact_store.upload(path=output_host_path)
-                output_artifacts[output_name] = artifact
+            output_artifacts = None
+            succeeded = exit_code == 0
+            if succeeded:
+                output_artifacts = {}
+                for output_name in output_names:
+                    output_host_path = host_output_paths_map[output_name]
+                    artifact = artifact_store.upload(path=output_host_path)
+                    output_artifacts[output_name] = artifact
 
-            return output_artifacts
+            execution_result = interfaces.ContainerExecutionResult(
+                start_time=start_time,
+                end_time=end_time,
+                exit_code=exit_code,
+                logs=logs,
+                output_artifacts=output_artifacts,
+            )
+
+            return execution_result
