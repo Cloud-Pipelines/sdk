@@ -129,36 +129,39 @@ class LaunchersTestCase(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as output_dir:
             artifact_store = LocalArtifactStore(root_dir=output_dir)
-            runners.run_task(
+            execution = runners.run_task(
                 task_spec=pipeline_task,
                 input_arguments=pipeline_task.arguments,
                 task_launcher=LocalEnvironmentLauncher(),
                 artifact_store=artifact_store,
             )
+            execution.wait_for_completion()
 
     def test_local_docker_launcher(self):
         pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             artifact_store = LocalArtifactStore(root_dir=output_dir)
-            runners.run_task(
+            execution = runners.run_task(
                 task_spec=pipeline_task,
                 input_arguments=pipeline_task.arguments,
                 task_launcher=DockerContainerLauncher(),
                 artifact_store=artifact_store,
             )
+            execution.wait_for_completion()
 
     def test_local_kubernetes_launcher(self):
         pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             artifact_store = LocalArtifactStore(root_dir=output_dir)
-            runners.run_task(
+            execution = runners.run_task(
                 task_spec=pipeline_task,
                 input_arguments=pipeline_task.arguments,
                 task_launcher=LocalKubernetesContainerLauncher(),
                 artifact_store=artifact_store,
             )
+            execution.wait_for_completion()
 
 
 if __name__ == "__main__":
