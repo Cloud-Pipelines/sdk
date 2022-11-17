@@ -30,7 +30,7 @@ def _run_graph_task(
     graph_execution = GraphExecution(
         task_spec=task_spec,
         input_arguments=graph_input_artifacts,
-        output_artifacts=graph_output_artifacts,
+        outputs=graph_output_artifacts,
         task_executions=task_executions,
     )
 
@@ -64,9 +64,7 @@ def _run_graph_task(
         )
         task_executions[child_task_id] = child_task_execution
 
-        task_id_to_output_artifacts_map[
-            child_task_id
-        ] = child_task_execution.output_artifacts
+        task_id_to_output_artifacts_map[child_task_id] = child_task_execution.outputs
 
     graph_execution._waiters = [
         task_execution.wait_for_completion
@@ -138,7 +136,7 @@ def run_task(
             task_spec=task_spec,
             input_arguments=input_artifacts,
             status=ExecutionStatus.WaitingForUpstream,
-            output_artifacts=output_future_artifacts,
+            outputs=output_future_artifacts,
         )
 
         def launch_container_task_and_set_output_artifact_futures():
@@ -224,7 +222,7 @@ class ExecutionStatus(enum.Enum):
 class Execution:
     task_spec: structures.TaskSpec
     input_arguments: Mapping[str, artifact_stores.Artifact]
-    output_artifacts: Optional[Mapping[str, artifact_stores.Artifact]] = None
+    outputs: Optional[Mapping[str, artifact_stores.Artifact]] = None
     _waiters: Sequence[Callable[[], None]] = None
 
     def wait_for_completion(self):
