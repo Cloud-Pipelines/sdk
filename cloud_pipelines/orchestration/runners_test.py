@@ -123,6 +123,17 @@ def _build_nested_graph_pipeline_task():
     return nested_pipeline_op(outer_graph_input_1="outer_graph_input_1")
 
 
+@components.create_component_from_func
+def produce_value() -> str:
+    print("Component: produce_value")
+    return "produce_value"
+
+
+@components.create_component_from_func
+def consume_as_value(data):
+    print("Component: consume_as_value: " + data)
+
+
 class LaunchersTestCase(unittest.TestCase):
     def test_local_environment_launcher(self):
         pipeline_task = _build_nested_graph_pipeline_task()
@@ -162,6 +173,23 @@ class LaunchersTestCase(unittest.TestCase):
                 artifact_store=artifact_store,
             )
             execution.wait_for_completion()
+
+    def test_eager_mode(self):
+        # Disabling the eager mode on exception to not affect other tests
+        try:
+            runners.enable_eager_mode()
+
+            data1 = produce_value().outputs["Output"]
+            consume_as_value(data=data1)
+            consume_as_value(data="constant_value")
+        finally:
+            runners.disable_eager_mode()
+
+    def test_enable_eager_mode(self):
+        with runners.EagerMode():
+            data1 = produce_value().outputs["Output"]
+            consume_as_value(data=data1)
+            consume_as_value(data="constant_value")
 
 
 if __name__ == "__main__":

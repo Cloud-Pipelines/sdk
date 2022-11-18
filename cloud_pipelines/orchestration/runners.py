@@ -2,7 +2,7 @@ from concurrent import futures
 import dataclasses
 import datetime
 import enum
-from typing import Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 
 from .. import components
@@ -205,6 +205,91 @@ def run_task(
         raise RuntimeError(
             f"Unsupported component implementation: {component_spec.implementation}"
         )
+
+
+_eager_mode: Optional["EagerMode"] = None
+
+
+def enable_eager_mode(
+    task_launcher: launchers.ContainerTaskLauncher = None,
+    artifact_store: artifact_stores.ArtifactStore = None,
+    wait_for_completion_on_exit: bool = True,
+):
+    global _eager_mode
+    if _eager_mode:
+        raise RuntimeError("Already in eager mode.")
+
+    _eager_mode = EagerMode(
+        task_launcher=task_launcher,
+        artifact_store=artifact_store,
+        wait_for_completion_on_exit=wait_for_completion_on_exit,
+    )
+    _eager_mode.__enter__()
+
+
+def disable_eager_mode():
+    global _eager_mode
+    if not _eager_mode:
+        raise RuntimeError("Not in eager mode.")
+    _eager_mode.__exit__(None, None, None)
+    _eager_mode = None
+
+
+class EagerMode:
+    def __init__(
+        self,
+        task_launcher: launchers.ContainerTaskLauncher = None,
+        artifact_store: artifact_stores.ArtifactStore = None,
+        wait_for_completion_on_exit: bool = True,
+    ):
+        if not task_launcher:
+            from .launchers.local_docker_launcher import DockerContainerLauncher
+
+            task_launcher = DockerContainerLauncher()
+        if not artifact_store:
+            from .artifact_stores.local_artifact_store import LocalArtifactStore
+            import tempfile
+
+            root_dir = tempfile.mkdtemp(prefix="cloud_pipelines.")
+            artifact_store = LocalArtifactStore(root_dir)
+        self._task_launcher = task_launcher
+        self._artifact_store = artifact_store
+        self._old_container_task_constructor = None
+        self._wait_for_completion_on_exit = wait_for_completion_on_exit
+        self._executions: Sequence[Execution] = []
+
+    def __enter__(self):
+        def _create_execution_from_component_and_arguments(
+            arguments: Mapping[str, Any],
+            component_ref: structures.ComponentReference = None,
+            **kwargs,
+        ) -> Execution:
+            task_spec = structures.TaskSpec(
+                component_ref=component_ref,
+            )
+            execution = run_task(
+                task_spec=task_spec,
+                input_arguments=arguments,
+                artifact_store=self._artifact_store,
+                task_launcher=self._task_launcher,
+            )
+            self._executions.append(execution)
+            return execution
+
+        from .._components.components import _components
+
+        self._old_container_task_constructor = _components._container_task_constructor
+        _components._container_task_constructor = (
+            _create_execution_from_component_and_arguments
+        )
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        from .._components.components import _components
+
+        _components._container_task_constructor = self._old_container_task_constructor
+        if self._wait_for_completion_on_exit:
+            for execution in self._executions:
+                execution.wait_for_completion()
 
 
 class ExecutionStatus(enum.Enum):
