@@ -1,9 +1,10 @@
 import datetime
+import logging
 import os
 from pathlib import Path
 import subprocess
 import tempfile
-from typing import Dict, Mapping
+from typing import Callable, Dict, Mapping, Optional
 
 from ...components import structures
 from ..._components.components._components import _resolve_command_line_and_paths
@@ -13,12 +14,20 @@ from . import interfaces
 from .naming_utils import sanitize_file_name
 
 
+_logger = logging.getLogger(__name__)
+
+_PROCESS_ID_LOG_ANNOTATION_KEY = "process_id"
+
+
 class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
     def launch_container_task(
         self,
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
+        on_log_entry_callback: Optional[
+            Callable[[interfaces.ProcessLogEntry], None]
+        ] = None,
     ) -> interfaces.ContainerExecutionResult:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -77,20 +86,32 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             process_env.update(container_spec.env or {})
 
             start_time = datetime.datetime.utcnow()
-            res = subprocess.run(
+            with subprocess.Popen(
                 args=resolved_cmd.command + resolved_cmd.args,
                 env=process_env,
                 cwd=host_workdir,
                 # Write STDERR to the same stream as STDOUT
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-            )
-            end_time = datetime.datetime.utcnow()
-            logs = res.stdout
-            exit_code = res.returncode
+            ) as process:
+                _logger.info(f"Started process {process.pid}")
+                log = interfaces.ProcessLog()
+                for log_line_bytes in process.stdout:
+                    log_entry = interfaces.ProcessLogEntry(
+                        message_bytes=log_line_bytes,
+                        time=datetime.datetime.utcnow(),
+                        annotations={_PROCESS_ID_LOG_ANNOTATION_KEY: process.pid},
+                    )
+                    if on_log_entry_callback:
+                        on_log_entry_callback(log_entry=log_entry)
+                    log.add_entry(log_entry)
+                log.close()
+                # Wait should be unnecessary since we read all logs to end before getting here.
+                # Popen.__exit__ closes process.stdout and calls process.wait
+                # process.wait()
 
-            print("Logs:")
-            print(logs)
+            end_time = datetime.datetime.utcnow()
+            exit_code = process.returncode
 
             # Storing the output data
             output_artifacts = None
@@ -106,7 +127,7 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
                 start_time=start_time,
                 end_time=end_time,
                 exit_code=exit_code,
-                logs=logs,
+                log=log,
                 output_artifacts=output_artifacts,
             )
 

@@ -2,6 +2,7 @@ from concurrent import futures
 import dataclasses
 import datetime
 import enum
+import logging
 from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 
@@ -11,12 +12,21 @@ from . import artifact_stores
 from . import launchers
 
 
+_default_log_printer_logger = logging.getLogger(__name__ + "._default_log_printer")
+_default_log_printer_logger.setLevel("INFO")
+_default_log_printer_logger.propagate = False
+_default_log_printer_handler = logging.StreamHandler()
+_default_log_printer_handler.setFormatter(logging.Formatter(fmt="%(message)s"))
+_default_log_printer_logger.addHandler(_default_log_printer_handler)
+
+
 def _run_graph_task(
     task_spec: structures.TaskSpec,
     graph_input_artifacts: Mapping[str, artifact_stores.Artifact],
     task_launcher: launchers.ContainerTaskLauncher,
     artifact_store: artifact_stores.ArtifactStore,
     futures_executor: futures.Executor = None,
+    on_log_entry_callback: Optional[Callable[[launchers.ProcessLogEntry], None]] = None,
 ) -> "GraphExecution":
     task_id_to_output_artifacts_map = {}  # Task ID -> output name -> artifact
 
@@ -61,6 +71,7 @@ def _run_graph_task(
             task_launcher=task_launcher,
             artifact_store=artifact_store,
             futures_executor=futures_executor,
+            on_log_entry_callback=on_log_entry_callback,
         )
         task_executions[child_task_id] = child_task_execution
 
@@ -89,12 +100,20 @@ def _run_graph_task(
     return graph_execution
 
 
+def _default_log_printer(log_entry: launchers.ProcessLogEntry):
+    log_text = str(log_entry).replace("\r\n", "\n").rstrip()
+    _default_log_printer_logger.info(log_text, extra=log_entry.annotations)
+
+
 def run_task(
     task_spec: structures.TaskSpec,
     input_arguments: Mapping[str, Union[str, artifact_stores.Artifact]],
     task_launcher: launchers.ContainerTaskLauncher,
     artifact_store: artifact_stores.ArtifactStore,
     futures_executor: futures.Executor = None,
+    on_log_entry_callback: Optional[
+        Callable[[launchers.ProcessLogEntry], None]
+    ] = _default_log_printer,
 ) -> "Execution":
     futures_executor = futures_executor or futures.ThreadPoolExecutor()
 
@@ -170,11 +189,19 @@ def run_task(
                 return None
 
             execution.status = ExecutionStatus.Running
+            if on_log_entry_callback:
+                log_text = f"Starting container task."
+                log_entry = launchers.ProcessLogEntry(
+                    message_bytes=log_text.encode("utf-8"),
+                    time=datetime.datetime.utcnow(),
+                )
+                on_log_entry_callback(log_entry)
 
             container_execution_result = task_launcher.launch_container_task(
                 task_spec=task_spec,
                 input_artifacts=resolved_input_artifacts,
                 artifact_store=artifact_store,
+                on_log_entry_callback=on_log_entry_callback,
             )
             execution.end_time = container_execution_result.end_time
             if container_execution_result.exit_code == 0:
@@ -186,6 +213,15 @@ def run_task(
                 execution.status = ExecutionStatus.Failed
                 for future in output_artifact_futures.values():
                     future.set_exception(ExecutionFailedError(execution=execution))
+            if on_log_entry_callback:
+                log_text = (
+                    f"Container task completed with status: {execution.status.name}"
+                )
+                log_entry = launchers.ProcessLogEntry(
+                    message_bytes=log_text.encode("utf-8"),
+                    time=datetime.datetime.utcnow(),
+                )
+                on_log_entry_callback(log_entry)
             return container_execution_result
 
         container_launch_future = futures_executor.submit(
@@ -200,6 +236,7 @@ def run_task(
             graph_input_artifacts=input_artifacts,
             task_launcher=task_launcher,
             artifact_store=artifact_store,
+            on_log_entry_callback=on_log_entry_callback,
         )
     else:
         raise RuntimeError(

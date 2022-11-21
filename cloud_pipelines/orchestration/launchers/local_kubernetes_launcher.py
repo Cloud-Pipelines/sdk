@@ -1,11 +1,14 @@
+import datetime
+import logging
 import os
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
-from typing import Dict, List, Mapping
+from typing import Callable, Dict, List, Mapping, Optional
 
 from kubernetes import config as k8s_config
 from kubernetes import client as k8s_client
+from kubernetes import watch as k8s_watch
 
 from ...components import structures
 from ..._components.components._components import _resolve_command_line_and_paths
@@ -17,6 +20,11 @@ from .kubernetes_utils import (
     wait_for_pod_to_succeed_or_fail,
 )
 from .naming_utils import sanitize_file_name, sanitize_kubernetes_resource_name
+
+
+_logger = logging.getLogger(__name__)
+
+_POD_NAME_LOG_ANNOTATION_KEY = "kubernetes_pod_name"
 
 
 class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
@@ -47,6 +55,9 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
+        on_log_entry_callback: Optional[
+            Callable[[interfaces.ProcessLogEntry], None]
+        ] = None,
     ) -> interfaces.ContainerExecutionResult:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -218,8 +229,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
                 body=pod,
             )
 
-            print("Pod name:")
-            print(pod_res.metadata.name)
+            _logger.info(f"Created pod {pod_res.metadata.name}")
 
             pod_name = pod_res.metadata.name
             wait_for_pod_to_stop_pending(
@@ -254,16 +264,26 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
             end_time = main_container_terminated_state.finished_at
             exit_code = main_container_terminated_state.exit_code
 
-            logs: bytes = None
+            log = interfaces.ProcessLog()
             try:
-                logs = core_api.read_namespaced_pod_log(
+                for text in k8s_watch.Watch().stream(
+                    core_api.read_namespaced_pod_log,
                     name=pod_res.metadata.name,
                     namespace=pod_res.metadata.namespace,
-                    container="main",
-                    timestamps=False,
-                ).encode("utf-8")
+                ):
+                    log_entry = interfaces.ProcessLogEntry(
+                        message_bytes=text.encode("utf-8"),
+                        time=datetime.datetime.utcnow(),
+                        annotations={
+                            _POD_NAME_LOG_ANNOTATION_KEY: pod_res.metadata.name
+                        },
+                    )
+                    if on_log_entry_callback:
+                        on_log_entry_callback(log_entry=log_entry)
+                    log.add_entry(log_entry)
             except k8s_client.ApiException as e:
-                print(f"Exception while reading the logs: {e}")
+                _logger.exception(f"Exception while reading the logs.", exc_info=True)
+            log.close()
 
             # Storing the output data
             output_artifacts = None
@@ -279,7 +299,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
                 start_time=start_time,
                 end_time=end_time,
                 exit_code=exit_code,
-                logs=logs,
+                log=log,
                 output_artifacts=output_artifacts,
             )
             return execution_result

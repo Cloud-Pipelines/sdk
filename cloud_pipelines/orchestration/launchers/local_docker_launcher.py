@@ -1,11 +1,13 @@
 import datetime
+import logging
 import os
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
-from typing import Dict, Mapping
+from typing import Callable, Mapping, Optional
 
 import docker
+from docker.models.containers import Container
 
 from ...components import structures
 from ..._components.components._components import _resolve_command_line_and_paths
@@ -15,12 +17,20 @@ from . import interfaces
 from .naming_utils import sanitize_file_name
 
 
+_logger = logging.getLogger(__name__)
+
+_CONTAINER_ID_LOG_ANNOTATION_KEY = "container_id"
+
+
 class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
     def launch_container_task(
         self,
         task_spec: structures.TaskSpec,
         artifact_store: artifact_stores.ArtifactStore,
         input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
+        on_log_entry_callback: Optional[
+            Callable[[interfaces.ProcessLogEntry], None]
+        ] = None,
     ) -> interfaces.ContainerExecutionResult:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -111,7 +121,7 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
 
             docker_client = docker.from_env()
             start_time = datetime.datetime.utcnow()
-            container = docker_client.containers.run(
+            container: Container = docker_client.containers.run(
                 image=component_spec.implementation.container.image,
                 entrypoint=resolved_cmd.command,
                 command=resolved_cmd.args,
@@ -120,22 +130,26 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
                 volumes=volumes,
                 detach=True,
             )
+            _logger.info(f"Started container {container.id}")
             log_generator = container.logs(
                 stdout=True, stderr=True, stream=True, follow=True
             )
-            log_lines = []
-            for log_line in log_generator:
-                log_lines.append(log_line)
-                print(log_line)
+            log = interfaces.ProcessLog()
+            for log_bytes in log_generator:
+                log_entry = interfaces.ProcessLogEntry(
+                    message_bytes=log_bytes,
+                    time=datetime.datetime.utcnow(),
+                    annotations={_CONTAINER_ID_LOG_ANNOTATION_KEY: container.id},
+                )
+                if on_log_entry_callback:
+                    on_log_entry_callback(log_entry=log_entry)
+                log.add_entry(log_entry)
+            log.close()
+
             wait_result = container.wait()
             end_time = datetime.datetime.utcnow()
 
             exit_status = wait_result["StatusCode"]
-            # logs_bytes = container.logs(stdout=True, stderr=True, stream=False)
-            logs_bytes = b"".join([line for line in log_lines])
-
-            print("Container logs:")
-            print(logs_bytes)
 
             # Storing the output data
             output_artifacts = None
@@ -151,7 +165,7 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
                 start_time=start_time,
                 end_time=end_time,
                 exit_code=exit_status,
-                logs=logs_bytes,
+                log=log,
                 output_artifacts=output_artifacts,
             )
 
