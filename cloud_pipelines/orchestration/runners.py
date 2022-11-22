@@ -244,35 +244,7 @@ def run_task(
         )
 
 
-_eager_mode: Optional["EagerMode"] = None
-
-
-def enable_eager_mode(
-    task_launcher: launchers.ContainerTaskLauncher = None,
-    artifact_store: artifact_stores.ArtifactStore = None,
-    wait_for_completion_on_exit: bool = True,
-):
-    global _eager_mode
-    if _eager_mode:
-        raise RuntimeError("Already in eager mode.")
-
-    _eager_mode = EagerMode(
-        task_launcher=task_launcher,
-        artifact_store=artifact_store,
-        wait_for_completion_on_exit=wait_for_completion_on_exit,
-    )
-    _eager_mode.__enter__()
-
-
-def disable_eager_mode():
-    global _eager_mode
-    if not _eager_mode:
-        raise RuntimeError("Not in eager mode.")
-    _eager_mode.__exit__(None, None, None)
-    _eager_mode = None
-
-
-class EagerMode:
+class InteractiveMode:
     def __init__(
         self,
         task_launcher: launchers.ContainerTaskLauncher = None,
@@ -327,6 +299,31 @@ class EagerMode:
         if self._wait_for_completion_on_exit:
             for execution in self._executions:
                 execution.wait_for_completion()
+
+    _interactive_mode: Optional["InteractiveMode"] = None
+
+    @staticmethod
+    def activate(
+        task_launcher: launchers.ContainerTaskLauncher = None,
+        artifact_store: artifact_stores.ArtifactStore = None,
+        wait_for_completion_on_exit: bool = True,
+    ):
+        if InteractiveMode._interactive_mode:
+            raise RuntimeError("Already in eager mode.")
+
+        InteractiveMode._interactive_mode = InteractiveMode(
+            task_launcher=task_launcher,
+            artifact_store=artifact_store,
+            wait_for_completion_on_exit=wait_for_completion_on_exit,
+        )
+        InteractiveMode._interactive_mode.__enter__()
+
+    @staticmethod
+    def deactivate():
+        if not InteractiveMode._interactive_mode:
+            raise RuntimeError("Not in eager mode.")
+        InteractiveMode._interactive_mode.__exit__(None, None, None)
+        InteractiveMode._interactive_mode = None
 
 
 class ExecutionStatus(enum.Enum):

@@ -174,19 +174,19 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution.wait_for_completion()
 
-    def test_eager_mode(self):
-        # Disabling the eager mode on exception to not affect other tests
+    def test_interactive_mode_activate(self):
+        # Disabling the interactive mode on exception to not affect other tests
         try:
-            runners.enable_eager_mode()
+            runners.InteractiveMode.activate()
 
             data1 = produce_value().outputs["Output"]
             consume_as_value(data=data1)
             consume_as_value(data="constant_value")
         finally:
-            runners.disable_eager_mode()
+            runners.InteractiveMode.deactivate()
 
-    def test_enable_eager_mode(self):
-        with runners.EagerMode():
+    def test_interactive_mode_context(self):
+        with runners.InteractiveMode():
             data1 = produce_value().outputs["Output"]
             consume_as_value(data=data1)
             consume_as_value(data="constant_value")
