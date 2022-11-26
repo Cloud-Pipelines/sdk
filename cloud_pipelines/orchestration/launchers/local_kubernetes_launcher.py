@@ -233,10 +233,15 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
 
             pod_name = pod_res.metadata.name
             wait_for_pod_to_stop_pending(
-                pod_name=pod_name, api_client=self._k8s_client, timeout_seconds=30
+                pod_name=pod_name,
+                namespace=self._namespace,
+                api_client=self._k8s_client,
+                timeout_seconds=30,
             )
             pod = wait_for_pod_to_succeed_or_fail(
-                pod_name=pod_name, api_client=self._k8s_client
+                pod_name=pod_name,
+                namespace=self._namespace,
+                api_client=self._k8s_client,
             )
             if not pod:
                 raise NotImplementedError
