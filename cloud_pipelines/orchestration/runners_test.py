@@ -139,12 +139,13 @@ class LaunchersTestCase(unittest.TestCase):
         pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
-            artifact_store = LocalArtifactStore(root_dir=output_dir)
-            execution = runners.run_task(
+            runner = runners.Runner(
+                task_launcher=LocalEnvironmentLauncher(),
+                artifact_store=LocalArtifactStore(root_dir=output_dir),
+            )
+            execution = runner.run_task(
                 task_spec=pipeline_task,
                 input_arguments=pipeline_task.arguments,
-                task_launcher=LocalEnvironmentLauncher(),
-                artifact_store=artifact_store,
             )
             execution.wait_for_completion()
 
@@ -152,12 +153,13 @@ class LaunchersTestCase(unittest.TestCase):
         pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
-            artifact_store = LocalArtifactStore(root_dir=output_dir)
-            execution = runners.run_task(
+            runner = runners.Runner(
+                task_launcher=DockerContainerLauncher(),
+                artifact_store=LocalArtifactStore(root_dir=output_dir),
+            )
+            execution = runner.run_task(
                 task_spec=pipeline_task,
                 input_arguments=pipeline_task.arguments,
-                task_launcher=DockerContainerLauncher(),
-                artifact_store=artifact_store,
             )
             execution.wait_for_completion()
 
@@ -165,12 +167,13 @@ class LaunchersTestCase(unittest.TestCase):
         pipeline_task = _build_nested_graph_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
-            artifact_store = LocalArtifactStore(root_dir=output_dir)
-            execution = runners.run_task(
+            runner = runners.Runner(
+                task_launcher=LocalKubernetesContainerLauncher(),
+                artifact_store=LocalArtifactStore(root_dir=output_dir),
+            )
+            execution = runner.run_task(
                 task_spec=pipeline_task,
                 input_arguments=pipeline_task.arguments,
-                task_launcher=LocalKubernetesContainerLauncher(),
-                artifact_store=artifact_store,
             )
             execution.wait_for_completion()
 
