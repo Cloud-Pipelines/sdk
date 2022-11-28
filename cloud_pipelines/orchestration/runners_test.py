@@ -145,7 +145,6 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution = runner.run_task(
                 task_spec=pipeline_task,
-                input_arguments=pipeline_task.arguments,
             )
             execution.wait_for_completion()
 
@@ -159,7 +158,6 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution = runner.run_task(
                 task_spec=pipeline_task,
-                input_arguments=pipeline_task.arguments,
             )
             execution.wait_for_completion()
 
@@ -173,7 +171,6 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution = runner.run_task(
                 task_spec=pipeline_task,
-                input_arguments=pipeline_task.arguments,
             )
             execution.wait_for_completion()
 

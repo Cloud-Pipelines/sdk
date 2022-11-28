@@ -128,11 +128,30 @@ class Runner:
     def run_task(
         self,
         task_spec: structures.TaskSpec,
-        input_arguments: Mapping[str, Union[str, artifact_stores.Artifact]],
+        input_arguments: Optional[
+            Mapping[str, Union[str, artifact_stores.Artifact]]
+        ] = None,
     ) -> "Execution":
+        for argument in (task_spec.arguments or {}).values():
+            if isinstance(argument, str):
+                pass
+            elif isinstance(argument, structures.GraphInputArgument):
+                raise NotImplementedError
+            elif isinstance(argument, structures.TaskOutputArgument):
+                raise NotImplementedError
+            else:
+                raise TypeError(
+                    "Unsupported argument type: {} - {}.".format(
+                        str(type(argument).__name__), str(argument)
+                    )
+                )
+        full_input_arguments = task_spec.arguments or {}
+        if input_arguments:
+            full_input_arguments.update(input_arguments)
+
         return self._run_task(
             task_spec=task_spec,
-            input_arguments=input_arguments,
+            input_arguments=full_input_arguments,
         )
 
     def _run_task(
