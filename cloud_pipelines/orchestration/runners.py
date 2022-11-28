@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import enum
 import logging
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
 
 
 from .. import components
@@ -19,9 +19,17 @@ _default_log_printer_handler = logging.StreamHandler()
 _default_log_printer_handler.setFormatter(logging.Formatter(fmt="%(message)s"))
 _default_log_printer_logger.addHandler(_default_log_printer_handler)
 
+_TASK_ID_STACK_LOG_ANNOTATION_KEY = "task_id_stack"
+
 
 def _default_log_printer(log_entry: launchers.ProcessLogEntry):
-    log_text = str(log_entry).replace("\r\n", "\n").rstrip()
+    log_text = log_entry.message_bytes.decode("utf-8").replace("\r\n", "\n").rstrip()
+    if log_entry.annotations:
+        task_id_stack = log_entry.annotations.get(_TASK_ID_STACK_LOG_ANNOTATION_KEY)
+        if task_id_stack:
+            log_text = "[" + "/".join(list(task_id_stack)) + "] " + log_text
+    if log_entry.time:
+        log_text = log_entry.time.isoformat(sep=" ") + ": " + log_text
     _default_log_printer_logger.info(log_text, extra=log_entry.annotations)
 
 
@@ -43,6 +51,7 @@ class Runner:
         self,
         task_spec: structures.TaskSpec,
         graph_input_artifacts: Mapping[str, artifact_stores.Artifact],
+        task_id_stack: List[str],
     ) -> "GraphExecution":
         task_id_to_output_artifacts_map = {}  # Task ID -> output name -> artifact
 
@@ -84,6 +93,7 @@ class Runner:
             child_task_execution = self._run_task(
                 task_spec=child_task_spec,
                 input_arguments=task_input_artifacts,
+                task_id_stack=task_id_stack + [child_task_id],
             )
             task_executions[child_task_id] = child_task_execution
 
@@ -129,6 +139,7 @@ class Runner:
         self,
         task_spec: structures.TaskSpec,
         input_arguments: Mapping[str, Union[str, artifact_stores.Artifact]],
+        task_id_stack: Optional[List[str]] = None,
     ) -> "Execution":
         if task_spec.component_ref.spec is None:
             if task_spec.component_ref.url:
@@ -203,20 +214,34 @@ class Runner:
                         )
                     return None
 
+                def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
+                    if task_id_stack:
+                        if not log_entry.annotations:
+                            log_entry.annotations = {}
+                        log_entry.annotations[_TASK_ID_STACK_LOG_ANNOTATION_KEY] = list(
+                            task_id_stack
+                        )
+                    if self._on_log_entry_callback:
+                        self._on_log_entry_callback(log_entry)
+
+                on_log_entry_callback = (
+                    add_task_ids_to_log_entries if self._on_log_entry_callback else None
+                )
+
                 execution.status = ExecutionStatus.Running
-                if self._on_log_entry_callback:
+                if on_log_entry_callback:
                     log_text = f"Starting container task."
                     log_entry = launchers.ProcessLogEntry(
                         message_bytes=log_text.encode("utf-8"),
                         time=datetime.datetime.utcnow(),
                     )
-                    self._on_log_entry_callback(log_entry)
+                    on_log_entry_callback(log_entry)
 
                 container_execution_result = self._task_launcher.launch_container_task(
                     task_spec=task_spec,
                     input_artifacts=resolved_input_artifacts,
                     artifact_store=self._artifact_store,
-                    on_log_entry_callback=self._on_log_entry_callback,
+                    on_log_entry_callback=on_log_entry_callback,
                 )
                 execution.end_time = container_execution_result.end_time
                 if container_execution_result.exit_code == 0:
@@ -228,7 +253,7 @@ class Runner:
                     execution.status = ExecutionStatus.Failed
                     for future in output_artifact_futures.values():
                         future.set_exception(ExecutionFailedError(execution=execution))
-                if self._on_log_entry_callback:
+                if on_log_entry_callback:
                     log_text = (
                         f"Container task completed with status: {execution.status.name}"
                     )
@@ -236,7 +261,7 @@ class Runner:
                         message_bytes=log_text.encode("utf-8"),
                         time=datetime.datetime.utcnow(),
                     )
-                    self._on_log_entry_callback(log_entry)
+                    on_log_entry_callback(log_entry)
                 return container_execution_result
 
             container_launch_future = self._futures_executor.submit(
@@ -249,6 +274,7 @@ class Runner:
             return self._run_graph_task(
                 task_spec=task_spec,
                 graph_input_artifacts=input_artifacts,
+                task_id_stack=task_id_stack or [],
             )
         else:
             raise RuntimeError(
