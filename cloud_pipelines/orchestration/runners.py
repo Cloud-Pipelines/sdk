@@ -81,7 +81,7 @@ class Runner:
                     )
                 task_input_artifacts[input_name] = artifact
 
-            child_task_execution = self.run_task(
+            child_task_execution = self._run_task(
                 task_spec=child_task_spec,
                 input_arguments=task_input_artifacts,
             )
@@ -116,6 +116,16 @@ class Runner:
         return graph_execution
 
     def run_task(
+        self,
+        task_spec: structures.TaskSpec,
+        input_arguments: Mapping[str, Union[str, artifact_stores.Artifact]],
+    ) -> "Execution":
+        return self._run_task(
+            task_spec=task_spec,
+            input_arguments=input_arguments,
+        )
+
+    def _run_task(
         self,
         task_spec: structures.TaskSpec,
         input_arguments: Mapping[str, Union[str, artifact_stores.Artifact]],
