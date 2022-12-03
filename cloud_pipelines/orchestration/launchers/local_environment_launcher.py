@@ -9,7 +9,7 @@ from typing import Callable, Dict, Mapping, Optional
 from ...components import structures
 from ..._components.components._components import _resolve_command_line_and_paths
 
-from .. import artifact_stores
+from .. import storage_providers
 from . import interfaces
 from .naming_utils import sanitize_file_name
 
@@ -23,8 +23,8 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
     def launch_container_task(
         self,
         task_spec: structures.TaskSpec,
-        artifact_store: artifact_stores.ArtifactStore,
-        input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
+        input_uri_readers: Mapping[str, storage_providers.UriReader],
+        output_uri_writers: Mapping[str, storage_providers.UriWriter],
         on_log_entry_callback: Optional[
             Callable[[interfaces.ProcessLogEntry], None]
         ] = None,
@@ -34,8 +34,6 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
         container_spec: structures.ContainerSpec = (
             component_spec.implementation.container
         )
-
-        input_artifacts = input_artifacts or {}
 
         input_names = list(input.name for input in component_spec.inputs or [])
         output_names = list(output.name for output in component_spec.outputs or [])
@@ -58,14 +56,14 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             # Design options: We could download/mount all artifacts and optionally read from local files,
             # but mounting can be more expensive compared to downloading.
             def artifact_value_getter(
-                value: artifact_stores.Artifact, input_type
+                value: storage_providers.UriReader, type_name: str
             ) -> str:
-                assert isinstance(value, artifact_stores.Artifact)
-                return value.read_text()
+                assert isinstance(value, storage_providers.UriReader)
+                return value.download_as_bytes().decode("utf-8")
 
             resolved_cmd = _resolve_command_line_and_paths(
                 component_spec=component_spec,
-                arguments=input_artifacts,
+                arguments=input_uri_readers,
                 input_path_generator=host_input_paths_map.get,
                 output_path_generator=host_output_paths_map.get,
                 argument_serializer=artifact_value_getter,
@@ -74,9 +72,9 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             # Getting the input data
             for input_name in resolved_cmd.input_paths.keys():
                 input_host_path = host_input_paths_map[input_name]
-                input_artifact = input_artifacts[input_name]
+                input_uri_reader = input_uri_readers[input_name]
                 Path(input_host_path).parent.mkdir(parents=True, exist_ok=True)
-                input_artifact.download(path=input_host_path)
+                input_uri_reader.download_to_path(path=input_host_path)
 
             # Preparing the output locations
             for output_host_path in host_output_paths_map.values():
@@ -114,21 +112,18 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             exit_code = process.returncode
 
             # Storing the output data
-            output_artifacts = None
             succeeded = exit_code == 0
             if succeeded:
-                output_artifacts = {}
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
-                    artifact = artifact_store.upload(path=output_host_path)
-                    output_artifacts[output_name] = artifact
+                    output_uri_writer = output_uri_writers[output_name]
+                    output_uri_writer.upload_from_path(output_host_path)
 
             execution_result = interfaces.ContainerExecutionResult(
                 start_time=start_time,
                 end_time=end_time,
                 exit_code=exit_code,
                 log=log,
-                output_artifacts=output_artifacts,
             )
 
             return execution_result

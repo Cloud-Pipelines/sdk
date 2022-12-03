@@ -4,7 +4,7 @@ import datetime
 from typing import Callable, Dict, List, Mapping, Optional
 
 from ...components import structures
-from .. import artifact_stores
+from .. import storage_providers
 
 __all__ = ["ContainerTaskLauncher", "ProcessLog", "ProcessLogEntry"]
 
@@ -14,8 +14,8 @@ class ContainerTaskLauncher(abc.ABC):
     def launch_container_task(
         self,
         task_spec: structures.TaskSpec,
-        artifact_store: artifact_stores.ArtifactStore,
-        input_artifacts: Mapping[str, artifact_stores.Artifact] = None,
+        input_uri_readers: Mapping[str, storage_providers.UriReader],
+        output_uri_writers: Mapping[str, storage_providers.UriWriter],
         on_log_entry_callback: Optional[Callable[["ProcessLogEntry"], None]] = None,
     ) -> "ContainerExecutionResult":
         raise NotImplementedError
@@ -28,7 +28,6 @@ class ContainerExecutionResult:
     exit_code: int
     # TODO: Replace with logs_artifact
     log: "ProcessLog"
-    output_artifacts: Dict[str, artifact_stores.Artifact]
 
 
 class ProcessLog:

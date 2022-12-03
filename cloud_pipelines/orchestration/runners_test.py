@@ -20,10 +20,7 @@ from cloud_pipelines.orchestration.launchers.local_kubernetes_launcher import (
     LocalKubernetesContainerLauncher,
 )
 
-from cloud_pipelines.orchestration import artifact_stores
-from cloud_pipelines.orchestration.artifact_stores.local_artifact_store import (
-    LocalArtifactStore,
-)
+from cloud_pipelines.orchestration.storage_providers import local_storage
 
 
 def _build_data_passing_graph_component():
@@ -141,7 +138,7 @@ class LaunchersTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
                 task_launcher=LocalEnvironmentLauncher(),
-                artifact_store=LocalArtifactStore(root_dir=output_dir),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
             )
             execution = runner.run_task(
                 task_spec=pipeline_task,
@@ -154,7 +151,7 @@ class LaunchersTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
                 task_launcher=DockerContainerLauncher(),
-                artifact_store=LocalArtifactStore(root_dir=output_dir),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
             )
             execution = runner.run_task(
                 task_spec=pipeline_task,
@@ -167,7 +164,7 @@ class LaunchersTestCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
                 task_launcher=LocalKubernetesContainerLauncher(),
-                artifact_store=LocalArtifactStore(root_dir=output_dir),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
             )
             execution = runner.run_task(
                 task_spec=pipeline_task,

@@ -3,12 +3,14 @@ import dataclasses
 import datetime
 import enum
 import logging
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
+import uuid
 
 
 from .. import components
 from ..components import structures
 from . import artifact_stores
+from . import storage_providers
 from . import launchers
 
 
@@ -37,30 +39,53 @@ class Runner:
     def __init__(
         self,
         task_launcher: launchers.ContainerTaskLauncher,
-        artifact_store: artifact_stores.ArtifactStore,
+        root_uri: storage_providers.UriAccessor,
         on_log_entry_callback: Optional[
             Callable[[launchers.ProcessLogEntry], None]
         ] = _default_log_printer,
     ):
         self._task_launcher = task_launcher
-        self._artifact_store = artifact_store
+        self._root_uri = root_uri
         self._on_log_entry_callback = on_log_entry_callback
         self._futures_executor = futures.ThreadPoolExecutor()
+        self._artifacts_root = root_uri.make_subpath(relative_path="artifacts")
+
+    def _generate_artifact_data_uri(
+        self,
+    ) -> storage_providers.UriAccessor:
+        return self._artifacts_root.make_subpath(
+            relative_path="uuid=" + uuid.uuid4().hex
+        ).make_subpath(relative_path="data")
+
+    def _upload_constant_data_as_artifact(self, data: bytes) -> "_StorageArtifact":
+        uri_accessor = self._generate_artifact_data_uri()
+        uri_accessor.get_writer().upload_from_bytes(data=data)
+        artifact = _StorageArtifact(uri_reader=uri_accessor.get_reader())
+        return artifact
 
     def _run_graph_task(
         self,
         task_spec: structures.TaskSpec,
-        graph_input_artifacts: Mapping[str, artifact_stores.Artifact],
+        # graph_input_artifacts: Mapping[str, "_StorageArtifact"],
+        graph_input_artifacts: Mapping[
+            str,
+            Union[
+                "_StorageArtifact",
+                "_FutureStorageArtifact",
+            ],
+        ],
         task_id_stack: List[str],
     ) -> "GraphExecution":
-        task_id_to_output_artifacts_map = {}  # Task ID -> output name -> artifact
+        task_id_to_output_artifacts_map: Dict[
+            str, Dict[str, "_StorageArtifact"]
+        ] = {}  # Task ID -> output name -> artifact
 
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         graph_spec: structures.GraphSpec = component_spec.implementation.graph
         toposorted_tasks = graph_spec._toposorted_tasks
 
-        graph_output_artifacts = {}
+        graph_output_artifacts: Dict[str, artifact_stores.Artifact] = {}
         task_executions = {}
         graph_execution = GraphExecution(
             task_spec=task_spec,
@@ -73,9 +98,11 @@ class Runner:
             # resolving task arguments
             task_input_artifacts = {}
             for input_name, argument in child_task_spec.arguments.items():
-                artifact: artifact_stores.Artifact = None
+                artifact: _StorageArtifact = None
                 if isinstance(argument, str):
-                    artifact = self._artifact_store.upload_text(text=argument)
+                    artifact = self._upload_constant_data_as_artifact(
+                        data=argument.encode("utf-8")
+                    )
                 elif isinstance(argument, structures.GraphInputArgument):
                     artifact = graph_input_artifacts[argument.graph_input.input_name]
                 elif isinstance(argument, structures.TaskOutputArgument):
@@ -157,7 +184,14 @@ class Runner:
     def _run_task(
         self,
         task_spec: structures.TaskSpec,
-        input_arguments: Mapping[str, Union[str, artifact_stores.Artifact]],
+        input_arguments: Mapping[
+            str,
+            Union[
+                str,
+                "_StorageArtifact",
+                "_FutureStorageArtifact",
+            ],
+        ],
         task_id_stack: Optional[List[str]] = None,
     ) -> "Execution":
         if task_spec.component_ref.spec is None:
@@ -173,9 +207,9 @@ class Runner:
 
         input_artifacts = {
             input_name: (
-                argument
-                if isinstance(argument, artifact_stores.Artifact)
-                else self._artifact_store.upload_text(argument)
+                self._upload_constant_data_as_artifact(data=argument.encode("utf-8"))
+                if isinstance(argument, str)
+                else argument
             )
             for input_name, argument in input_arguments.items()
         }
@@ -190,7 +224,7 @@ class Runner:
                 output_name: futures.Future() for output_name in output_names
             }
             output_future_artifacts = {
-                output_name: FutureArtifact(future)
+                output_name: _FutureStorageArtifact(future)
                 for output_name, future in output_artifact_futures.items()
             }
 
@@ -209,8 +243,8 @@ class Runner:
                 try:
                     resolved_input_artifacts = {
                         input_name: (
-                            argument.get_artifact()
-                            if isinstance(argument, FutureArtifact)
+                            argument._get_artifact()
+                            if isinstance(argument, _FutureStorageArtifact)
                             else argument
                         )
                         for input_name, argument in input_artifacts.items()
@@ -232,6 +266,19 @@ class Runner:
                             )
                         )
                     return None
+
+                input_uri_readers = {
+                    input_name: artifact._uri_reader
+                    for input_name, artifact in resolved_input_artifacts.items()
+                }
+                output_uris = {
+                    output_name: self._generate_artifact_data_uri()
+                    for output_name in output_names
+                }
+                output_uri_writers = {
+                    output_name: uri_accessor.get_writer()
+                    for output_name, uri_accessor in output_uris.items()
+                }
 
                 def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
                     if task_id_stack:
@@ -258,16 +305,19 @@ class Runner:
 
                 container_execution_result = self._task_launcher.launch_container_task(
                     task_spec=task_spec,
-                    input_artifacts=resolved_input_artifacts,
-                    artifact_store=self._artifact_store,
+                    input_uri_readers=input_uri_readers,
+                    output_uri_writers=output_uri_writers,
                     on_log_entry_callback=on_log_entry_callback,
                 )
                 execution.end_time = container_execution_result.end_time
                 if container_execution_result.exit_code == 0:
                     execution.status = ExecutionStatus.Succeeded
-                    output_artifacts = container_execution_result.output_artifacts
                     for output_name, future in output_artifact_futures.items():
-                        future.set_result(output_artifacts[output_name])
+                        output_uri = output_uris[output_name]
+                        output_artifact = _StorageArtifact(
+                            uri_reader=output_uri.get_reader()
+                        )
+                        future.set_result(output_artifact)
                 else:
                     execution.status = ExecutionStatus.Failed
                     for future in output_artifact_futures.values():
@@ -305,22 +355,23 @@ class InteractiveMode:
     def __init__(
         self,
         task_launcher: launchers.ContainerTaskLauncher = None,
-        artifact_store: artifact_stores.ArtifactStore = None,
+        root_uri: storage_providers.UriAccessor = None,
         wait_for_completion_on_exit: bool = True,
     ):
         if not task_launcher:
             from .launchers.local_docker_launcher import DockerContainerLauncher
 
             task_launcher = DockerContainerLauncher()
-        if not artifact_store:
-            from .artifact_stores.local_artifact_store import LocalArtifactStore
+        if not root_uri:
+            from .storage_providers import local_storage
             import tempfile
 
             root_dir = tempfile.mkdtemp(prefix="cloud_pipelines.")
-            artifact_store = LocalArtifactStore(root_dir)
+
+            root_uri = local_storage.LocalStorageProvider().make_uri(root_dir)
         self._runner = Runner(
             task_launcher=task_launcher,
-            artifact_store=artifact_store,
+            root_uri=root_uri,
         )
         self._old_container_task_constructor = None
         self._wait_for_completion_on_exit = wait_for_completion_on_exit
@@ -362,7 +413,7 @@ class InteractiveMode:
     @staticmethod
     def activate(
         task_launcher: launchers.ContainerTaskLauncher = None,
-        artifact_store: artifact_stores.ArtifactStore = None,
+        root_uri: storage_providers.UriAccessor = None,
         wait_for_completion_on_exit: bool = True,
     ):
         if InteractiveMode._interactive_mode:
@@ -370,7 +421,7 @@ class InteractiveMode:
 
         InteractiveMode._interactive_mode = InteractiveMode(
             task_launcher=task_launcher,
-            artifact_store=artifact_store,
+            root_uri=root_uri,
             wait_for_completion_on_exit=wait_for_completion_on_exit,
         )
         InteractiveMode._interactive_mode.__enter__()
@@ -431,16 +482,29 @@ class UpstreamExecutionFailedError(Exception):
         self.upstream_execution = upstream_execution
 
 
-class FutureArtifact(artifact_stores.Artifact):
-    def __init__(self, artifact_future: futures.Future[artifact_stores.Artifact]):
+class _StorageArtifact(artifact_stores.Artifact):
+    def __init__(
+        self,
+        uri_reader: storage_providers.UriReader,
+    ):
+        self._uri_reader = uri_reader
+
+    def download(self, path: str):
+        self._uri_reader.download_to_path(path=path)
+
+    def _download_as_bytes(self) -> bytes:
+        return self._uri_reader.download_as_bytes()
+
+
+class _FutureStorageArtifact(artifact_stores.Artifact):
+    def __init__(self, artifact_future: futures.Future):
         self._artifact_future = artifact_future
 
-    def get_artifact(self) -> artifact_stores.Artifact:
-        self._artifact_future.running
+    def _get_artifact(self) -> _StorageArtifact:
         return self._artifact_future.result()
 
     def download(self, path: str):
-        self.get_artifact().download(path=path)
+        self._get_artifact().download(path=path)
 
-    def read_text(self) -> str:
-        return self.get_artifact().read_text()
+    def _download_as_bytes(self) -> bytes:
+        return self._get_artifact()._download_as_bytes()
