@@ -55,10 +55,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
-        on_log_entry_callback: Optional[
-            Callable[[interfaces.ProcessLogEntry], None]
-        ] = None,
-    ) -> interfaces.ContainerExecutionResult:
+    ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         container_spec: structures.ContainerSpec = (
@@ -222,89 +219,148 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
             # Otherwise doing `k8s_client.CoreV1Api().*` every time leads to warnings during unit tests:
             # ResourceWarning: unclosed <ssl.SSLSocket fd=1056, family=AddressFamily.AF_INET, type=SocketKind.SOCK_STREAM, proto=0, laddr=('127.0.0.1', 56456), raddr=('127.0.0.1', 6443)>
             core_api = k8s_client.CoreV1Api(api_client=self._k8s_client)
+            start_time = datetime.datetime.utcnow()
             pod_res = core_api.create_namespaced_pod(
                 namespace=self._namespace,
                 body=pod,
             )
 
-            _logger.info(f"Created pod {pod_res.metadata.name}")
-
             pod_name = pod_res.metadata.name
-            wait_for_pod_to_stop_pending(
-                pod_name=pod_name,
-                namespace=self._namespace,
-                api_client=self._k8s_client,
-                timeout_seconds=30,
-            )
-            pod = wait_for_pod_to_succeed_or_fail(
-                pod_name=pod_name,
-                namespace=self._namespace,
-                api_client=self._k8s_client,
-            )
-            if not pod:
-                raise NotImplementedError
-            pod_status: k8s_client.V1PodStatus = pod.status
-            container_statuses: List[
-                k8s_client.V1ContainerStatus
-            ] = pod_status.container_statuses
-            main_container_statuses = [
-                container_status
-                for container_status in container_statuses
-                if container_status.name == "main"
-            ]
-            if len(main_container_statuses) != 1:
-                raise RuntimeError(
-                    f"Cannot get the main container status form the pod: {pod}"
-                )
-            main_container_status = main_container_statuses[0]
-            main_container_state: k8s_client.V1ContainerState = (
-                main_container_status.state
-            )
-            main_container_terminated_state: k8s_client.V1ContainerStateTerminated = (
-                main_container_state.terminated
-            )
-            start_time = main_container_terminated_state.started_at
-            end_time = main_container_terminated_state.finished_at
-            exit_code = main_container_terminated_state.exit_code
+            _logger.info(f"Created pod {pod_name}")
 
-            log = interfaces.ProcessLog()
-            try:
-                for text in k8s_watch.Watch().stream(
-                    core_api.read_namespaced_pod_log,
-                    name=pod_res.metadata.name,
-                    namespace=pod_res.metadata.namespace,
-                ):
-                    log_entry = interfaces.ProcessLogEntry(
-                        message_bytes=text.encode("utf-8"),
-                        time=datetime.datetime.utcnow(),
-                        annotations={
-                            _POD_NAME_LOG_ANNOTATION_KEY: pod_res.metadata.name
-                        },
-                    )
-                    if on_log_entry_callback:
-                        on_log_entry_callback(log_entry=log_entry)
-                    log.add_entry(log_entry)
-            except k8s_client.ApiException as e:
-                _logger.exception(f"Exception while reading the logs.", exc_info=True)
-            log.close()
-
-            # Storing the output data
-            succeeded = exit_code == 0
-            if succeeded:
+            def upload_all_artifacts():
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
                     output_uri_writer = output_uri_writers[output_name]
                     output_uri_writer.upload_from_path(output_host_path)
 
-            execution_result = interfaces.ContainerExecutionResult(
+            def clean_up():
+                shutil.rmtree(tempdir, ignore_errors=True)
+
+            launched_kubernetes_pod = _LaunchedKubernetesPod(
+                api_client=self._k8s_client,
+                pod_name=pod_name,
+                namespace=self._namespace,
+                upload_all_artifacts=upload_all_artifacts,
+                clean_up=clean_up,
                 start_time=start_time,
-                end_time=end_time,
-                exit_code=exit_code,
-                log=log,
             )
-            return execution_result
-        finally:
-            shutil.rmtree(tempdir, ignore_errors=True)
+            return launched_kubernetes_pod
+        except:
+            # shutil.rmtree(tempdir, ignore_errors=True)
+            raise
+
+
+class _LaunchedKubernetesPod(interfaces.LaunchedContainer):
+    def __init__(
+        self,
+        api_client: k8s_client.ApiClient,
+        pod_name: str,
+        namespace: str,
+        upload_all_artifacts: Callable[[], None],
+        clean_up: Callable[[], None],
+        start_time: datetime.datetime,
+    ):
+        self._k8s_api_client = api_client
+        self._pod_name = pod_name
+        self._namespace = namespace
+        self._upload_all_artifacts = upload_all_artifacts
+        self._clean_up = clean_up
+        self._start_time = start_time or datetime.datetime.utcnow()
+        self._execution_result: Optional[interfaces.ContainerExecutionResult] = None
+
+    def wait_for_completion(
+        self,
+        on_log_entry_callback: Optional[
+            Callable[[interfaces.ProcessLogEntry], None]
+        ] = None,
+    ) -> interfaces.ContainerExecutionResult:
+        # This function is not thread-safe. It can only be called once.
+        if self._execution_result:
+            # TODO: Stream the logs?
+            return self._execution_result
+
+        core_api = k8s_client.CoreV1Api(api_client=self._k8s_api_client)
+
+        wait_for_pod_to_stop_pending(
+            pod_name=self._pod_name,
+            namespace=self._namespace,
+            api_client=self._k8s_api_client,
+            timeout_seconds=30,
+        )
+        pod = wait_for_pod_to_succeed_or_fail(
+            pod_name=self._pod_name,
+            namespace=self._namespace,
+            api_client=self._k8s_api_client,
+        )
+        if not pod:
+            raise RuntimeError(
+                f"There was an error getting pod information for pod={self._pod_name} in namespace {self._namespace}"
+            )
+        pod_status: k8s_client.V1PodStatus = pod.status
+        container_statuses: List[
+            k8s_client.V1ContainerStatus
+        ] = pod_status.container_statuses
+        main_container_statuses = [
+            container_status
+            for container_status in container_statuses
+            if container_status.name == "main"
+        ]
+        if len(main_container_statuses) != 1:
+            raise RuntimeError(
+                f"Cannot get the main container status form the pod: {pod}"
+            )
+        main_container_status = main_container_statuses[0]
+        main_container_state: k8s_client.V1ContainerState = main_container_status.state
+        main_container_terminated_state: k8s_client.V1ContainerStateTerminated = (
+            main_container_state.terminated
+        )
+        # start_time = main_container_terminated_state.started_at
+        end_time = main_container_terminated_state.finished_at
+        exit_code = main_container_terminated_state.exit_code
+
+        log = interfaces.ProcessLog()
+        try:
+            for text in k8s_watch.Watch().stream(
+                core_api.read_namespaced_pod_log,
+                name=self._pod_name,
+                namespace=self._namespace,
+            ):
+                assert isinstance(text, str)
+                log_entry = interfaces.ProcessLogEntry(
+                    message_bytes=text.encode("utf-8"),
+                    time=datetime.datetime.utcnow(),
+                    annotations={_POD_NAME_LOG_ANNOTATION_KEY: self._pod_name},
+                )
+                if on_log_entry_callback:
+                    on_log_entry_callback(log_entry)
+                log.add_entry(log_entry)
+        except k8s_client.ApiException as e:
+            _logger.exception(f"Exception while reading the logs.", exc_info=True)
+        log.close()
+
+        # Storing the output data
+        succeeded = exit_code == 0
+        if succeeded:
+            self._upload_all_artifacts()
+
+        self._clean_up()
+
+        self._execution_result = interfaces.ContainerExecutionResult(
+            start_time=self._start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+            log=log,
+        )
+        return self._execution_result
+
+    def terminate(self, grace_period_seconds: Optional[int] = None):
+        k8s_client.CoreV1Api(api_client=self._k8s_api_client).delete_namespaced_pod(
+            name=self._pod_name,
+            namespace=self._namespace,
+            grace_period_seconds=grace_period_seconds,
+        )
+        self._clean_up()
 
 
 def windows_path_to_docker_path(path: str) -> str:

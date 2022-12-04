@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 from typing import Callable, Dict, Mapping, Optional
 
 from ...components import structures
@@ -25,10 +26,7 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
-        on_log_entry_callback: Optional[
-            Callable[[interfaces.ProcessLogEntry], None]
-        ] = None,
-    ) -> interfaces.ContainerExecutionResult:
+    ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         container_spec: structures.ContainerSpec = (
@@ -38,7 +36,10 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
         input_names = list(input.name for input in component_spec.inputs or [])
         output_names = list(output.name for output in component_spec.outputs or [])
 
-        with tempfile.TemporaryDirectory() as tempdir:
+        tempdir_context = tempfile.TemporaryDirectory()
+        try:
+            tempdir = tempdir_context.name
+
             host_workdir = os.path.join(tempdir, "work")
             # host_logdir = os.path.join(tempdir, 'logs')
             host_input_paths_map = {
@@ -84,46 +85,106 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             process_env.update(container_spec.env or {})
 
             start_time = datetime.datetime.utcnow()
-            with subprocess.Popen(
+            process = subprocess.Popen(
                 args=resolved_cmd.command + resolved_cmd.args,
                 env=process_env,
                 cwd=host_workdir,
                 # Write STDERR to the same stream as STDOUT
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-            ) as process:
-                _logger.info(f"Started process {process.pid}")
-                log = interfaces.ProcessLog()
-                for log_line_bytes in process.stdout:
-                    log_entry = interfaces.ProcessLogEntry(
-                        message_bytes=log_line_bytes,
-                        time=datetime.datetime.utcnow(),
-                        annotations={_PROCESS_ID_LOG_ANNOTATION_KEY: process.pid},
-                    )
-                    if on_log_entry_callback:
-                        on_log_entry_callback(log_entry=log_entry)
-                    log.add_entry(log_entry)
-                log.close()
-                # Wait should be unnecessary since we read all logs to end before getting here.
-                # Popen.__exit__ closes process.stdout and calls process.wait
-                # process.wait()
+            )
+            _logger.info(f"Started process {process.pid}")
 
-            end_time = datetime.datetime.utcnow()
-            exit_code = process.returncode
-
-            # Storing the output data
-            succeeded = exit_code == 0
-            if succeeded:
+            def upload_all_artifacts():
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
                     output_uri_writer = output_uri_writers[output_name]
                     output_uri_writer.upload_from_path(output_host_path)
 
-            execution_result = interfaces.ContainerExecutionResult(
-                start_time=start_time,
-                end_time=end_time,
-                exit_code=exit_code,
-                log=log,
-            )
+            def clean_up():
+                process.__exit__(None, None, None)
+                tempdir_context.cleanup()
 
-            return execution_result
+            launched_process = _LaunchedProcess(
+                process=process,
+                upload_all_artifacts=upload_all_artifacts,
+                clean_up=clean_up,
+                start_time=start_time,
+            )
+            return launched_process
+        except:
+            # tempdir_context.cleanup()
+            raise
+
+
+class _LaunchedProcess(interfaces.LaunchedContainer):
+    def __init__(
+        self,
+        process: subprocess.Popen,
+        upload_all_artifacts: Callable[[], None],
+        clean_up: Callable[[], None],
+        start_time: datetime.datetime,
+    ):
+        self._process = process
+        self._upload_all_artifacts = upload_all_artifacts
+        self._clean_up = clean_up
+        self._start_time = start_time or datetime.datetime.utcnow()
+        self._execution_result: Optional[interfaces.ContainerExecutionResult] = None
+
+    def wait_for_completion(
+        self,
+        on_log_entry_callback: Optional[
+            Callable[[interfaces.ProcessLogEntry], None]
+        ] = None,
+    ) -> interfaces.ContainerExecutionResult:
+        # This function is not thread-safe. It can only be called once.
+        if self._execution_result:
+            # TODO: Stream the logs?
+            return self._execution_result
+
+        log = interfaces.ProcessLog()
+        for log_line_bytes in self._process.stdout or []:
+            log_entry = interfaces.ProcessLogEntry(
+                message_bytes=log_line_bytes,
+                time=datetime.datetime.utcnow(),
+                annotations={_PROCESS_ID_LOG_ANNOTATION_KEY: self._process.pid},
+            )
+            if on_log_entry_callback:
+                on_log_entry_callback(log_entry)
+            log.add_entry(log_entry)
+        log.close()
+        # Wait should be unnecessary since we read all logs to end before getting here.
+        # Popen.__exit__ closes process.stdout and calls process.wait
+        # process.wait()
+
+        end_time = datetime.datetime.utcnow()
+        exit_code = self._process.returncode
+
+        # Storing the output data
+        succeeded = exit_code == 0
+        if succeeded:
+            self._upload_all_artifacts()
+
+        self._clean_up()
+
+        self._execution_result = interfaces.ContainerExecutionResult(
+            start_time=self._start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+            log=log,
+        )
+        return self._execution_result
+
+    def terminate(self, grace_period_seconds: Optional[int] = None):
+        self._process.terminate()
+        grace_period_seconds = grace_period_seconds or 10
+        if grace_period_seconds > 0:
+            threading.Timer(
+                interval=grace_period_seconds, function=self._kill_process_and_cleanup
+            )
+        else:
+            self._kill_process_and_cleanup()
+
+    def _kill_process_and_cleanup(self):
+        self._process.kill()
+        self._clean_up()

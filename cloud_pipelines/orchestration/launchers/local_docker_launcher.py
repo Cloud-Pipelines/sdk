@@ -28,10 +28,7 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
-        on_log_entry_callback: Optional[
-            Callable[[interfaces.ProcessLogEntry], None]
-        ] = None,
-    ) -> interfaces.ContainerExecutionResult:
+    ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
         container_spec: structures.ContainerSpec = (
@@ -43,9 +40,8 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
 
         # Not using with tempfile.TemporaryDirectory() as tempdir: due to: OSError: [WinError 145] The directory is not empty
         # Python 3.10 supports the ignore_cleanup_errors=True parameter.
+        tempdir = tempfile.mkdtemp()
         try:
-            tempdir = tempfile.mkdtemp()
-
             host_workdir = os.path.join(tempdir, "work")
             # host_logdir = os.path.join(tempdir, 'logs')
             host_input_paths_map = {
@@ -129,41 +125,90 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
                 detach=True,
             )
             _logger.info(f"Started container {container.id}")
-            log_generator = container.logs(
-                stdout=True, stderr=True, stream=True, follow=True
-            )
-            log = interfaces.ProcessLog()
-            for log_bytes in log_generator:
-                log_entry = interfaces.ProcessLogEntry(
-                    message_bytes=log_bytes,
-                    time=datetime.datetime.utcnow(),
-                    annotations={_CONTAINER_ID_LOG_ANNOTATION_KEY: container.id},
-                )
-                if on_log_entry_callback:
-                    on_log_entry_callback(log_entry=log_entry)
-                log.add_entry(log_entry)
-            log.close()
 
-            wait_result = container.wait()
-            end_time = datetime.datetime.utcnow()
-
-            exit_status = wait_result["StatusCode"]
-
-            # Storing the output data
-            succeeded = exit_status == 0
-            if succeeded:
+            def upload_all_artifacts():
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
                     output_uri_writer = output_uri_writers[output_name]
                     output_uri_writer.upload_from_path(output_host_path)
 
-            execution_result = interfaces.ContainerExecutionResult(
-                start_time=start_time,
-                end_time=end_time,
-                exit_code=exit_status,
-                log=log,
-            )
+            def clean_up():
+                container.remove()
+                shutil.rmtree(tempdir, ignore_errors=True)
 
-            return execution_result
-        finally:
-            shutil.rmtree(tempdir, ignore_errors=True)
+            launched_docker_container = _LaunchedDockerContainer(
+                container=container,
+                upload_all_artifacts=upload_all_artifacts,
+                clean_up=clean_up,
+                start_time=start_time,
+            )
+            return launched_docker_container
+        except:
+            # shutil.rmtree(tempdir, ignore_errors=True)
+            raise
+
+
+class _LaunchedDockerContainer(interfaces.LaunchedContainer):
+    def __init__(
+        self,
+        container: Container,
+        upload_all_artifacts: Callable[[], None],
+        clean_up: Callable[[], None],
+        start_time: datetime.datetime,
+    ):
+        self._container = container
+        self._upload_all_artifacts = upload_all_artifacts
+        self._clean_up = clean_up
+        self._start_time = start_time or datetime.datetime.utcnow()
+        self._execution_result: Optional[interfaces.ContainerExecutionResult] = None
+
+    def wait_for_completion(
+        self,
+        on_log_entry_callback: Optional[
+            Callable[[interfaces.ProcessLogEntry], None]
+        ] = None,
+    ) -> interfaces.ContainerExecutionResult:
+        # This function is not thread-safe. It can only be called once.
+        if self._execution_result:
+            # TODO: Stream the logs?
+            return self._execution_result
+        log_generator = self._container.logs(
+            stdout=True, stderr=True, stream=True, follow=True
+        )
+        log = interfaces.ProcessLog()
+        for log_bytes in log_generator:
+            log_entry = interfaces.ProcessLogEntry(
+                message_bytes=log_bytes,
+                time=datetime.datetime.utcnow(),
+                annotations={_CONTAINER_ID_LOG_ANNOTATION_KEY: self._container.id},
+            )
+            if on_log_entry_callback:
+                on_log_entry_callback(log_entry)
+            log.add_entry(log_entry)
+        log.close()
+
+        wait_result = self._container.wait()
+        end_time = datetime.datetime.utcnow()
+
+        exit_code = wait_result["StatusCode"]
+
+        # Storing the output data
+        succeeded = exit_code == 0
+        if succeeded:
+            self._upload_all_artifacts()
+
+        self._clean_up()
+
+        self._execution_result = interfaces.ContainerExecutionResult(
+            start_time=self._start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+            log=log,
+        )
+        return self._execution_result
+
+    def terminate(self, grace_period_seconds: Optional[int] = None):
+        self._container.stop(
+            timeout=grace_period_seconds,
+        )
+        self._clean_up()

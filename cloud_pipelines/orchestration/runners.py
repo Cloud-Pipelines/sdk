@@ -303,11 +303,13 @@ class Runner:
                     )
                     on_log_entry_callback(log_entry)
 
-                container_execution_result = self._task_launcher.launch_container_task(
+                launched_container = self._task_launcher.launch_container_task(
                     task_spec=task_spec,
                     input_uri_readers=input_uri_readers,
                     output_uri_writers=output_uri_writers,
-                    on_log_entry_callback=on_log_entry_callback,
+                )
+                container_execution_result = launched_container.wait_for_completion(
+                    on_log_entry_callback=on_log_entry_callback
                 )
                 execution.end_time = container_execution_result.end_time
                 if container_execution_result.exit_code == 0:

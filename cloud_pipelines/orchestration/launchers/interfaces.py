@@ -16,8 +16,24 @@ class ContainerTaskLauncher(abc.ABC):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
+    ) -> "LaunchedContainer":
+        raise NotImplementedError
+
+
+class LaunchedContainer(abc.ABC):
+    # @abc.abstractmethod
+    # def stream_logs(self) -> Iterator["ProcessLogEntry"]:
+    #     raise NotImplementedError
+
+    @abc.abstractmethod
+    def wait_for_completion(
+        self,
         on_log_entry_callback: Optional[Callable[["ProcessLogEntry"], None]] = None,
     ) -> "ContainerExecutionResult":
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def terminate(self, grace_period_seconds: Optional[int] = None):
         raise NotImplementedError
 
 
