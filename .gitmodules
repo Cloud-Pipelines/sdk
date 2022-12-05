@@ -1,9 +1,3 @@
-[submodule "src"]
-	path = src
-	url = https://github.com/Ark-kun/kfp_sdk_components.git
-[submodule "src2/components_src"]
-	path = src2/components_src
-	url = https://github.com/Ark-kun/kfp_sdk_components.git
 [submodule "cloud_pipelines/_components"]
 	path = cloud_pipelines/_components
 	url = https://github.com/Ark-kun/kfp_sdk_components.git
