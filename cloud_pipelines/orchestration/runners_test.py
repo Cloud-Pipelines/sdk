@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 
@@ -21,6 +22,10 @@ from cloud_pipelines.orchestration.launchers.local_kubernetes_launcher import (
 )
 
 from cloud_pipelines.orchestration.storage_providers import local_storage
+
+
+_GOOGLE_CLOUD_STORAGE_ROOT_URI_ENV_KEY = "CLOUD_PIPELINES_GOOGLE_CLOUD_STORAGE_ROOT_URI"
+_GOOGLE_CLOUD_STORAGE_ROOT_URI = os.environ.get(_GOOGLE_CLOUD_STORAGE_ROOT_URI_ENV_KEY)
 
 
 def _build_data_passing_graph_component():
@@ -170,6 +175,35 @@ class LaunchersTestCase(unittest.TestCase):
                 task_spec=pipeline_task,
             )
             execution.wait_for_completion()
+
+    @unittest.skipUnless(
+        condition=_GOOGLE_CLOUD_STORAGE_ROOT_URI is None,
+        reason="Root GCS URI is not set",
+    )
+    def test_google_cloud_batch_launcher(self):
+        from cloud_pipelines.orchestration.launchers.google_cloud_batch_launcher import (
+            GoogleCloudBatchLauncher,
+        )
+        from cloud_pipelines.orchestration.storage_providers.google_cloud_storage import (
+            GoogleCloudStorageProvider,
+        )
+
+        if not _GOOGLE_CLOUD_STORAGE_ROOT_URI:
+            self.skipTest(reason="Root GCS URI is not set")
+            return
+
+        pipeline_task = _build_nested_graph_pipeline_task()
+
+        runner = runners.Runner(
+            task_launcher=GoogleCloudBatchLauncher(),
+            root_uri=GoogleCloudStorageProvider().make_uri(
+                uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI
+            ),
+        )
+        execution = runner.run_task(
+            task_spec=pipeline_task,
+        )
+        execution.wait_for_completion()
 
     def test_interactive_mode_activate(self):
         # Disabling the interactive mode on exception to not affect other tests
