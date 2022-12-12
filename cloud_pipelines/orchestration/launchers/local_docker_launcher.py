@@ -29,8 +29,14 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
         self,
         client: Optional[docker.DockerClient] = None,
     ):
-        self._docker_client = client or docker.from_env()
-        self._docker_client.info()
+        try:
+            self._docker_client = client or docker.from_env()
+        except Exception as ex:
+            raise RuntimeError(
+                "Docker does not seem to be working."
+                " Please make sure that `docker version` executes without errors."
+                " Docker can be installed from https://docs.docker.com/get-docker/."
+            ) from ex
 
     def launch_container_task(
         self,
