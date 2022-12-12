@@ -517,6 +517,11 @@ class ContainerExecution(Execution):
     end_time: Optional[datetime.datetime] = None
     # TODO: Launcher-specific info
 
+    def __str__(self):
+        component_spec = self.task_spec.component_ref.spec
+        component_name = component_spec.name or "component"
+        return f"""<ContainerExecution(component="{component_name}", status="{self.status.name}")>"""
+
 
 @dataclasses.dataclass
 class GraphExecution(Execution):
