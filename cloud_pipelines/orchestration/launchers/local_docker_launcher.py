@@ -23,6 +23,15 @@ _CONTAINER_ID_LOG_ANNOTATION_KEY = "container_id"
 
 
 class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
+    """Launcher that uses Docker installed locally"""
+
+    def __init__(
+        self,
+        client: Optional[docker.DockerClient] = None,
+    ):
+        self._docker_client = client or docker.from_env()
+        self._docker_client.info()
+
     def launch_container_task(
         self,
         task_spec: structures.TaskSpec,
@@ -113,9 +122,8 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
                     mode="rw",
                 )
 
-            docker_client = docker.from_env()
             start_time = datetime.datetime.utcnow()
-            container: Container = docker_client.containers.run(
+            container: Container = self._docker_client.containers.run(
                 image=component_spec.implementation.container.image,
                 entrypoint=resolved_cmd.command,
                 command=resolved_cmd.args,
