@@ -486,6 +486,10 @@ class InteractiveMode:
         InteractiveMode._interactive_mode = None
 
 
+activate_interactive_mode = InteractiveMode.activate
+deactivate_interactive_mode = InteractiveMode.deactivate
+
+
 class ExecutionStatus(enum.Enum):
     Invalid = 0
     WaitingForUpstream = 1
