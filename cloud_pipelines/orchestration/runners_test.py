@@ -222,6 +222,18 @@ class LaunchersTestCase(unittest.TestCase):
             consume_as_value(data=data1)
             consume_as_value(data="constant_value")
 
+    def test_runner_run_component_with_callable(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            runner = runners.Runner(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            )
+            execution1 = runner.run_component(
+                component=consume_as_value,
+                arguments={"data": "test_runner_run_component"},
+                annotations={"annotation_key": "annotation_value"},
+            )
+            execution1.wait_for_completion()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

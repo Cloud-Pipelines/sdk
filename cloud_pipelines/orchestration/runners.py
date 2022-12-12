@@ -152,6 +152,56 @@ class Runner:
 
         return graph_execution
 
+    def run_component(
+        self,
+        component: Union[
+            Callable,
+            structures.ComponentSpec,
+            structures.ComponentReference,
+        ],
+        arguments: Optional[Mapping[str, Union[str, artifact_stores.Artifact]]] = None,
+        annotations: Optional[Dict[str, Any]] = None,
+    ):
+        component_ref: structures.ComponentReference
+        if isinstance(component, structures.ComponentReference):
+            component_ref = component
+        elif isinstance(component, structures.ComponentSpec):
+            component_spec = component
+            component_ref = structures.ComponentReference(spec=component_spec)
+        else:
+            maybe_component_ref = getattr(component, "_component_ref", None) or getattr(
+                component, "component_ref", None
+            )
+            if maybe_component_ref:
+                if isinstance(maybe_component_ref, structures.ComponentReference):
+                    component_ref = maybe_component_ref
+                else:
+                    raise TypeError(
+                        "Unsupported component reference: {maybe_component_ref}"
+                    )
+            else:
+                maybe_component_spec = getattr(component, "component_spec", None)
+                if maybe_component_spec:
+                    if isinstance(maybe_component_spec, structures.ComponentSpec):
+                        component_ref = structures.ComponentReference(
+                            spec=maybe_component_spec
+                        )
+                    else:
+                        raise TypeError(
+                            "Unsupported component spec: {maybe_component_spec}"
+                        )
+                else:
+                    raise TypeError("Could not find component in {component}")
+
+        task_spec = structures.TaskSpec(
+            component_ref=component_ref,
+            annotations=annotations,
+        )
+        return self.run_task(
+            task_spec=task_spec,
+            input_arguments=arguments,
+        )
+
     def run_task(
         self,
         task_spec: structures.TaskSpec,
