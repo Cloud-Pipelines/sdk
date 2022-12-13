@@ -177,7 +177,7 @@ class Runner:
                     component_ref = maybe_component_ref
                 else:
                     raise TypeError(
-                        "Unsupported component reference: {maybe_component_ref}"
+                        f"Unsupported component reference: {maybe_component_ref}"
                     )
             else:
                 maybe_component_spec = getattr(component, "component_spec", None)
@@ -188,10 +188,10 @@ class Runner:
                         )
                     else:
                         raise TypeError(
-                            "Unsupported component spec: {maybe_component_spec}"
+                            f"Unsupported component spec: {maybe_component_spec}"
                         )
                 else:
-                    raise TypeError("Could not find component in {component}")
+                    raise TypeError(f"Could not find component in {component}")
 
         task_spec = structures.TaskSpec(
             component_ref=component_ref,
