@@ -358,6 +358,7 @@ class Runner:
                     input_uri_readers=input_uri_readers,
                     output_uri_writers=output_uri_writers,
                 )
+                execution._launched_container = launched_container
                 container_execution_result = launched_container.wait_for_completion(
                     on_log_entry_callback=on_log_entry_callback
                 )
