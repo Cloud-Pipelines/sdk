@@ -352,16 +352,22 @@ class Runner:
                         time=datetime.datetime.utcnow(),
                     )
                     on_log_entry_callback(log_entry)
+                try:
+                    launched_container = self._task_launcher.launch_container_task(
+                        task_spec=task_spec,
+                        input_uri_readers=input_uri_readers,
+                        output_uri_writers=output_uri_writers,
+                    )
+                    execution._launched_container = launched_container
+                    container_execution_result = launched_container.wait_for_completion(
+                        on_log_entry_callback=on_log_entry_callback
+                    )
+                except Exception as ex:
+                    execution.status = ExecutionStatus.Failed
+                    execution.end_time = datetime.datetime.utcnow()
+                    execution._error_message = repr(ex)
+                    raise ExecutionFailedError(execution=execution) from ex
 
-                launched_container = self._task_launcher.launch_container_task(
-                    task_spec=task_spec,
-                    input_uri_readers=input_uri_readers,
-                    output_uri_writers=output_uri_writers,
-                )
-                execution._launched_container = launched_container
-                container_execution_result = launched_container.wait_for_completion(
-                    on_log_entry_callback=on_log_entry_callback
-                )
                 execution.end_time = container_execution_result.end_time
                 execution.exit_code = container_execution_result.exit_code
                 execution.log = container_execution_result.log
