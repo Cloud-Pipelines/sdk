@@ -482,10 +482,11 @@ class InteractiveMode:
 
     @staticmethod
     def deactivate():
-        if not InteractiveMode._interactive_mode:
-            raise RuntimeError("Not in eager mode.")
-        InteractiveMode._interactive_mode.__exit__(None, None, None)
+        interactive_mode = InteractiveMode._interactive_mode
         InteractiveMode._interactive_mode = None
+        if not interactive_mode:
+            raise RuntimeError("Not in eager mode.")
+        interactive_mode.__exit__(None, None, None)
 
 
 activate_interactive_mode = InteractiveMode.activate
