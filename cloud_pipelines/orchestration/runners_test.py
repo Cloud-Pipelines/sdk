@@ -234,6 +234,9 @@ class LaunchersTestCase(unittest.TestCase):
                 annotations={"annotation_key": "annotation_value"},
             )
             execution1.wait_for_completion()
+            self.assertIsInstance(execution1, runners.ContainerExecution)
+            assert isinstance(execution1, runners.ContainerExecution)
+            self.assertEqual(execution1.status, runners.ExecutionStatus.Succeeded)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
