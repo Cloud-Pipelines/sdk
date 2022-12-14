@@ -383,6 +383,8 @@ class Runner:
                         time=datetime.datetime.utcnow(),
                     )
                     on_log_entry_callback(log_entry)
+                if execution.status == ExecutionStatus.Failed:
+                    raise ExecutionFailedError(execution=execution)
                 return container_execution_result
 
             container_launch_future = self._futures_executor.submit(

@@ -136,6 +136,13 @@ def consume_as_value(data):
     print("Component: consume_as_value: " + data)
 
 
+@components.create_component_from_func
+def fail():
+    import sys
+
+    sys.exit(42)
+
+
 class LaunchersTestCase(unittest.TestCase):
     def test_local_environment_launcher(self):
         pipeline_task = _build_nested_graph_pipeline_task()
@@ -237,6 +244,12 @@ class LaunchersTestCase(unittest.TestCase):
             self.assertIsInstance(execution1, runners.ContainerExecution)
             assert isinstance(execution1, runners.ContainerExecution)
             self.assertEqual(execution1.status, runners.ExecutionStatus.Succeeded)
+
+    def test_exception_when_execution_fails_in_interactive_mode_when_exiting(self):
+        with self.assertRaises(runners.ExecutionFailedError):
+            with runners.InteractiveMode():
+                fail()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
