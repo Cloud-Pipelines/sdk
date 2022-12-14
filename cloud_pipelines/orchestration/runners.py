@@ -362,6 +362,8 @@ class Runner:
                     on_log_entry_callback=on_log_entry_callback
                 )
                 execution.end_time = container_execution_result.end_time
+                execution.exit_code = container_execution_result.exit_code
+                execution.log = container_execution_result.log
                 if container_execution_result.exit_code == 0:
                     execution.status = ExecutionStatus.Succeeded
                     for output_name, future in output_artifact_futures.items():
@@ -522,6 +524,8 @@ class ContainerExecution(Execution):
     status: ExecutionStatus = ExecutionStatus.Invalid
     start_time: Optional[datetime.datetime] = None
     end_time: Optional[datetime.datetime] = None
+    exit_code: Optional[int] = None
+    log: Optional[launchers.ProcessLog] = None
     # TODO: Launcher-specific info
 
     def __str__(self):

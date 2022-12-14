@@ -250,6 +250,23 @@ class LaunchersTestCase(unittest.TestCase):
             with runners.InteractiveMode():
                 fail()
 
+    def test_execution_has_end_time_and_exit_code_when_failed(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            runner = runners.Runner(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            )
+            execution = runner.run_component(
+                component=fail,
+            )
+        with self.assertRaises(runners.ExecutionFailedError):
+            execution.wait_for_completion()
+        assert isinstance(execution, runners.ContainerExecution)
+        self.assertEqual(execution.status, runners.ExecutionStatus.Failed)
+        self.assertIsNotNone(execution.start_time)
+        self.assertIsNotNone(execution.end_time)
+        self.assertEqual(execution.exit_code, 42)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
