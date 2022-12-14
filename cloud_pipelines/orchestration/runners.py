@@ -531,7 +531,7 @@ class ContainerExecution(Execution):
     log: Optional[launchers.ProcessLog] = None
     # TODO: Launcher-specific info
 
-    def __str__(self):
+    def __repr__(self):
         component_spec = self.task_spec.component_ref.spec
         component_name = component_spec.name or "component"
         return f"""<ContainerExecution(component="{component_name}", status="{self.status.name}")>"""
