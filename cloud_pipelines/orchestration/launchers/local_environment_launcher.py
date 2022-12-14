@@ -156,9 +156,9 @@ class _LaunchedProcess(interfaces.LaunchedContainer):
         # Wait should be unnecessary since we read all logs to end before getting here.
         # Popen.__exit__ closes process.stdout and calls process.wait
         # process.wait()
-
+        self._process.__exit__(None, None, None)
+        exit_code = self._process.wait()
         end_time = datetime.datetime.utcnow()
-        exit_code = self._process.returncode
 
         # Storing the output data
         succeeded = exit_code == 0
