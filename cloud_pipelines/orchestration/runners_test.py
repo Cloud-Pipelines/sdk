@@ -245,11 +245,6 @@ class LaunchersTestCase(unittest.TestCase):
             assert isinstance(execution1, runners.ContainerExecution)
             self.assertEqual(execution1.status, runners.ExecutionStatus.Succeeded)
 
-    def test_exception_when_execution_fails_in_interactive_mode_when_exiting(self):
-        with self.assertRaises(runners.ExecutionFailedError):
-            with runners.InteractiveMode():
-                fail()
-
     def test_execution_has_end_time_and_exit_code_when_failed(self):
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
@@ -259,8 +254,7 @@ class LaunchersTestCase(unittest.TestCase):
             execution = runner.run_component(
                 component=fail,
             )
-        with self.assertRaises(runners.ExecutionFailedError):
-            execution.wait_for_completion()
+        execution.wait_for_completion()
         assert isinstance(execution, runners.ContainerExecution)
         self.assertEqual(execution.status, runners.ExecutionStatus.Failed)
         self.assertIsNotNone(execution.start_time)
