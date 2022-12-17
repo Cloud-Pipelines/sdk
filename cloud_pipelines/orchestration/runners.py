@@ -287,6 +287,28 @@ class Runner:
                 outputs=output_future_artifacts,
             )
 
+            def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
+                if task_id_stack:
+                    if not log_entry.annotations:
+                        log_entry.annotations = {}
+                    log_entry.annotations[_TASK_ID_STACK_LOG_ANNOTATION_KEY] = list(
+                        task_id_stack
+                    )
+                if self._on_log_entry_callback:
+                    self._on_log_entry_callback(log_entry)
+
+            on_log_entry_callback = (
+                add_task_ids_to_log_entries if self._on_log_entry_callback else None
+            )
+
+            def log_message(message: str):
+                if on_log_entry_callback:
+                    log_entry = launchers.ProcessLogEntry(
+                        message_bytes=message.encode("utf-8"),
+                        time=datetime.datetime.utcnow(),
+                    )
+                    on_log_entry_callback(log_entry)
+
             def launch_container_task_and_set_output_artifact_futures():
                 # We might not need to resolve the artifacts explicitly before calling the task launcher,
                 # but this makes the error handling easier and avoid exposing the Execution class to the launchers.
@@ -330,28 +352,8 @@ class Runner:
                     for output_name, uri_accessor in output_uris.items()
                 }
 
-                def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
-                    if task_id_stack:
-                        if not log_entry.annotations:
-                            log_entry.annotations = {}
-                        log_entry.annotations[_TASK_ID_STACK_LOG_ANNOTATION_KEY] = list(
-                            task_id_stack
-                        )
-                    if self._on_log_entry_callback:
-                        self._on_log_entry_callback(log_entry)
-
-                on_log_entry_callback = (
-                    add_task_ids_to_log_entries if self._on_log_entry_callback else None
-                )
-
                 execution.status = ExecutionStatus.Starting
-                if on_log_entry_callback:
-                    log_text = f"Starting container task."
-                    log_entry = launchers.ProcessLogEntry(
-                        message_bytes=log_text.encode("utf-8"),
-                        time=datetime.datetime.utcnow(),
-                    )
-                    on_log_entry_callback(log_entry)
+                log_message(message="Starting container task.")
                 try:
                     launched_container = self._task_launcher.launch_container_task(
                         task_spec=task_spec,
@@ -384,15 +386,9 @@ class Runner:
                     execution.status = ExecutionStatus.Failed
                     for future in output_artifact_futures.values():
                         future.set_exception(ExecutionFailedError(execution=execution))
-                if on_log_entry_callback:
-                    log_text = (
-                        f"Container task completed with status: {execution.status.name}"
-                    )
-                    log_entry = launchers.ProcessLogEntry(
-                        message_bytes=log_text.encode("utf-8"),
-                        time=datetime.datetime.utcnow(),
-                    )
-                    on_log_entry_callback(log_entry)
+                log_message(
+                    message=f"Container task completed with status: {execution.status.name}"
+                )
                 if execution.status == ExecutionStatus.Failed:
                     raise ExecutionFailedError(execution=execution)
                 return container_execution_result
