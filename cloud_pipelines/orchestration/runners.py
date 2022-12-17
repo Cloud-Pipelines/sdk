@@ -344,7 +344,7 @@ class Runner:
                     add_task_ids_to_log_entries if self._on_log_entry_callback else None
                 )
 
-                execution.status = ExecutionStatus.Running
+                execution.status = ExecutionStatus.Starting
                 if on_log_entry_callback:
                     log_text = f"Starting container task."
                     log_entry = launchers.ProcessLogEntry(
@@ -358,6 +358,7 @@ class Runner:
                         input_uri_readers=input_uri_readers,
                         output_uri_writers=output_uri_writers,
                     )
+                    execution.status = ExecutionStatus.Running
                     execution._launched_container = launched_container
                     container_execution_result = launched_container.wait_for_completion(
                         on_log_entry_callback=on_log_entry_callback
