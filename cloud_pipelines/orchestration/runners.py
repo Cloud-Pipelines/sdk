@@ -331,14 +331,13 @@ class Runner:
                             else e.execution
                         )
                         execution._failed_upstream_execution = failed_upstream_execution
+                        exception = UpstreamExecutionFailedError(
+                            execution=execution,
+                            upstream_execution=failed_upstream_execution,
+                        )
                         for future in output_artifact_futures.values():
-                            future.set_exception(
-                                UpstreamExecutionFailedError(
-                                    execution=execution,
-                                    upstream_execution=failed_upstream_execution,
-                                )
-                            )
-                        return None
+                            future.set_exception(exception)
+                        raise exception  # from e
 
                     input_uri_readers = {
                         input_name: artifact._uri_reader
