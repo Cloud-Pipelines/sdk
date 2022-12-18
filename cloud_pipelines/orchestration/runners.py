@@ -310,51 +310,51 @@ class Runner:
                     on_log_entry_callback(log_entry)
 
             def launch_container_task_and_set_output_artifact_futures():
-                # We might not need to resolve the artifacts explicitly before calling the task launcher,
-                # but this makes the error handling easier and avoid exposing the Execution class to the launchers.
                 try:
-                    resolved_input_artifacts = {
-                        input_name: (
-                            argument._get_artifact()
-                            if isinstance(argument, _FutureStorageArtifact)
-                            else argument
-                        )
-                        for input_name, argument in input_artifacts.items()
-                    }
-                    execution.input_arguments = resolved_input_artifacts
-                except (UpstreamExecutionFailedError, ExecutionFailedError) as e:
-                    execution.status = ExecutionStatus.UpstreamFailed
-                    failed_upstream_execution = (
-                        e.upstream_execution
-                        if isinstance(e, UpstreamExecutionFailedError)
-                        else e.execution
-                    )
-                    execution._failed_upstream_execution = failed_upstream_execution
-                    for future in output_artifact_futures.values():
-                        future.set_exception(
-                            UpstreamExecutionFailedError(
-                                execution=execution,
-                                upstream_execution=failed_upstream_execution,
+                    # We might not need to resolve the artifacts explicitly before calling the task launcher,
+                    # but this makes the error handling easier and avoid exposing the Execution class to the launchers.
+                    try:
+                        resolved_input_artifacts = {
+                            input_name: (
+                                argument._get_artifact()
+                                if isinstance(argument, _FutureStorageArtifact)
+                                else argument
                             )
+                            for input_name, argument in input_artifacts.items()
+                        }
+                        execution.input_arguments = resolved_input_artifacts
+                    except (UpstreamExecutionFailedError, ExecutionFailedError) as e:
+                        execution.status = ExecutionStatus.UpstreamFailed
+                        failed_upstream_execution = (
+                            e.upstream_execution
+                            if isinstance(e, UpstreamExecutionFailedError)
+                            else e.execution
                         )
-                    return None
+                        execution._failed_upstream_execution = failed_upstream_execution
+                        for future in output_artifact_futures.values():
+                            future.set_exception(
+                                UpstreamExecutionFailedError(
+                                    execution=execution,
+                                    upstream_execution=failed_upstream_execution,
+                                )
+                            )
+                        return None
 
-                input_uri_readers = {
-                    input_name: artifact._uri_reader
-                    for input_name, artifact in resolved_input_artifacts.items()
-                }
-                output_uris = {
-                    output_name: self._generate_artifact_data_uri()
-                    for output_name in output_names
-                }
-                output_uri_writers = {
-                    output_name: uri_accessor.get_writer()
-                    for output_name, uri_accessor in output_uris.items()
-                }
+                    input_uri_readers = {
+                        input_name: artifact._uri_reader
+                        for input_name, artifact in resolved_input_artifacts.items()
+                    }
+                    output_uris = {
+                        output_name: self._generate_artifact_data_uri()
+                        for output_name in output_names
+                    }
+                    output_uri_writers = {
+                        output_name: uri_accessor.get_writer()
+                        for output_name, uri_accessor in output_uris.items()
+                    }
 
-                execution.status = ExecutionStatus.Starting
-                log_message(message="Starting container task.")
-                try:
+                    execution.status = ExecutionStatus.Starting
+                    log_message(message="Starting container task.")
                     launched_container = self._task_launcher.launch_container_task(
                         task_spec=task_spec,
                         input_uri_readers=input_uri_readers,
@@ -365,33 +365,35 @@ class Runner:
                     container_execution_result = launched_container.wait_for_completion(
                         on_log_entry_callback=on_log_entry_callback
                     )
+
+                    execution.end_time = container_execution_result.end_time
+                    execution.exit_code = container_execution_result.exit_code
+                    execution.log = container_execution_result.log
+                    if container_execution_result.exit_code == 0:
+                        execution.status = ExecutionStatus.Succeeded
+                        for output_name, future in output_artifact_futures.items():
+                            output_uri = output_uris[output_name]
+                            output_artifact = _StorageArtifact(
+                                uri_reader=output_uri.get_reader()
+                            )
+                            future.set_result(output_artifact)
+                    else:
+                        execution.status = ExecutionStatus.Failed
+                        for future in output_artifact_futures.values():
+                            future.set_exception(
+                                ExecutionFailedError(execution=execution)
+                            )
+                    log_message(
+                        message=f"Container task completed with status: {execution.status.name}"
+                    )
+                    if execution.status == ExecutionStatus.Failed:
+                        raise ExecutionFailedError(execution=execution)
+                    return container_execution_result
                 except Exception as ex:
-                    execution.status = ExecutionStatus.Failed
+                    execution.status = ExecutionStatus.SystemError
                     execution.end_time = datetime.datetime.utcnow()
                     execution._error_message = repr(ex)
                     raise ExecutionFailedError(execution=execution) from ex
-
-                execution.end_time = container_execution_result.end_time
-                execution.exit_code = container_execution_result.exit_code
-                execution.log = container_execution_result.log
-                if container_execution_result.exit_code == 0:
-                    execution.status = ExecutionStatus.Succeeded
-                    for output_name, future in output_artifact_futures.items():
-                        output_uri = output_uris[output_name]
-                        output_artifact = _StorageArtifact(
-                            uri_reader=output_uri.get_reader()
-                        )
-                        future.set_result(output_artifact)
-                else:
-                    execution.status = ExecutionStatus.Failed
-                    for future in output_artifact_futures.values():
-                        future.set_exception(ExecutionFailedError(execution=execution))
-                log_message(
-                    message=f"Container task completed with status: {execution.status.name}"
-                )
-                if execution.status == ExecutionStatus.Failed:
-                    raise ExecutionFailedError(execution=execution)
-                return container_execution_result
 
             container_launch_future = self._futures_executor.submit(
                 launch_container_task_and_set_output_artifact_futures
@@ -508,6 +510,7 @@ class ExecutionStatus(enum.Enum):
     Failed = 5
     UpstreamFailed = 6
     ConditionallySkipped = 7
+    SystemError = 8
 
 
 @dataclasses.dataclass
