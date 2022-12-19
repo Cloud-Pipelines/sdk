@@ -388,6 +388,9 @@ class Runner:
                     if execution.status == ExecutionStatus.Failed:
                         raise ExecutionFailedError(execution=execution)
                     return container_execution_result
+                # The status of Failed executions should not be changed to SystemError
+                except ExecutionFailedError:
+                    raise
                 except Exception as ex:
                     execution.status = ExecutionStatus.SystemError
                     execution.end_time = datetime.datetime.utcnow()
