@@ -3,15 +3,20 @@ import dataclasses
 import datetime
 import enum
 import logging
+import tempfile
+import os
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 import uuid
 
 
 from .. import components
+from .._components.components import _structures
 from ..components import structures
 from . import artifact_stores
 from . import storage_providers
 from . import launchers
+
+from ..components import _serialization
 
 
 _default_log_printer_logger = logging.getLogger(__name__ + "._default_log_printer")
@@ -22,6 +27,9 @@ _default_log_printer_handler.setFormatter(logging.Formatter(fmt="%(message)s"))
 _default_log_printer_logger.addHandler(_default_log_printer_handler)
 
 _TASK_ID_STACK_LOG_ANNOTATION_KEY = "task_id_stack"
+
+
+_ARTIFACT_PATH_LAST_PART = "data"
 
 
 def _default_log_printer(log_entry: launchers.ProcessLogEntry):
@@ -57,11 +65,29 @@ class Runner:
             relative_path="uuid=" + uuid.uuid4().hex
         ).make_subpath(relative_path="data")
 
+    # TODO: Add type to the artifact
     def _upload_constant_data_as_artifact(self, data: bytes) -> "_StorageArtifact":
         uri_accessor = self._generate_artifact_data_uri()
         uri_accessor.get_writer().upload_from_bytes(data=data)
         artifact = _StorageArtifact(uri_reader=uri_accessor.get_reader())
         return artifact
+
+    # TODO: Add type to the artifact
+    def _create_artifact_from_local_data(self, path: str) -> "_StorageArtifact":
+        uri_accessor = self._generate_artifact_data_uri()
+        uri_accessor.get_writer().upload_from_path(path=path)
+        artifact = _StorageArtifact(uri_reader=uri_accessor.get_reader())
+        return artifact
+
+    # TODO: Add type to the artifact
+    def _create_artifact_from_object(
+        self, obj: Any, type_spec: Optional[_structures.TypeSpecType]
+    ) -> "_StorageArtifact":
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # We could make the last path part anything, not just "data".
+            data_path = os.path.join(temp_dir, _ARTIFACT_PATH_LAST_PART)
+            _serialization.save(obj=obj, path=data_path, type_spec=type_spec)
+            return self._create_artifact_from_local_data(path=data_path)
 
     def _run_graph_task(
         self,
@@ -255,11 +281,18 @@ class Runner:
                 )
         component_spec = task_spec.component_ref.spec
 
+        input_specs = {
+            input_spec.name: input_spec for input_spec in component_spec.inputs or []
+        }
+
+        # TODO: Check artifact type compatibility. Can we share this between compilation and interactive?
         input_artifacts = {
             input_name: (
-                self._upload_constant_data_as_artifact(data=argument.encode("utf-8"))
-                if isinstance(argument, str)
-                else argument
+                argument
+                if isinstance(argument, artifact_stores.Artifact)
+                else self._create_artifact_from_object(
+                    obj=argument, type_spec=input_specs[input_name].type
+                )
             )
             for input_name, argument in input_arguments.items()
         }

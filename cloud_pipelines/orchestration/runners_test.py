@@ -1,5 +1,6 @@
 import os
 import tempfile
+import typing
 import unittest
 
 # from ..components import create_component_from_func, create_graph_component_from_pipeline_func
@@ -143,6 +144,50 @@ def fail():
     sys.exit(42)
 
 
+@components.create_component_from_func
+def _produce_and_consume_component(
+    output_model_path: components.OutputPath("Model"),
+    input_dataset_path: components.InputPath("Dataset") = None,
+    input_string: str = "default string",
+    input_integer: int = 42,
+    input_float: float = 3.14,
+    input_boolean: bool = True,
+    input_list: list = ["s", 42, 3.14, [{}], {"k": []}],
+    input_dict: dict = {
+        "str": "s",
+        "int": 42,
+        "float": 3.14,
+        "list": [{}],
+        "dict": {"k": []},
+    },
+) -> typing.NamedTuple(
+    "Outputs",
+    [
+        ("output_string", str),
+        ("output_integer", int),
+        ("output_float", float),
+        ("output_boolean", bool),
+        ("output_list", list),
+        ("output_dict", dict),
+    ],
+):
+    import pathlib
+
+    if input_dataset_path:
+        file_text = pathlib.Path(input_dataset_path).read_text()
+    else:
+        file_text = "no file passed"
+    pathlib.Path(output_model_path).write_text(file_text)
+    return (
+        input_string,
+        input_integer,
+        input_float,
+        input_boolean,
+        input_list,
+        input_dict,
+    )
+
+
 class LaunchersTestCase(unittest.TestCase):
     def test_local_environment_launcher(self):
         pipeline_task = _build_nested_graph_pipeline_task()
@@ -260,6 +305,33 @@ class LaunchersTestCase(unittest.TestCase):
         self.assertIsNotNone(execution.start_time)
         self.assertIsNotNone(execution.end_time)
         self.assertEqual(execution.exit_code, 42)
+
+    def test_runner_handles_serialization_of_basic_types(self):
+        with runners.InteractiveMode():
+            # Maybe I should actually validate the received values.
+            # But the Lightweight Python Components tests already check this.
+            execution = _produce_and_consume_component(
+                input_string="input_string",
+                input_integer=37,
+                input_float=2.73,
+                input_boolean=False,
+                input_list=["item"],
+                input_dict={"key1": "value1"},
+            )
+        assert isinstance(execution, runners.ContainerExecution)
+        self.assertEqual(execution.status, runners.ExecutionStatus.Succeeded)
+        self.assertIsNone(getattr(execution, "_error_message", None))
+
+    def test_runner_raises_exception_when_it_cannot_serialize_arguments(self):
+        with runners.InteractiveMode():
+            with self.assertRaises(ValueError):
+                _produce_and_consume_component(
+                    input_string=42,
+                )
+            with self.assertRaises(TypeError):
+                consume_as_value(
+                    data=LaunchersTestCase,
+                )
 
 
 if __name__ == "__main__":
