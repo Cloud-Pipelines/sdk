@@ -1,6 +1,8 @@
 import abc
 from typing import Optional
 
+from ..._components.components import _structures
+
 
 __all__ = [
     "Artifact",
@@ -8,8 +10,9 @@ __all__ = [
 
 
 class Artifact(abc.ABC):
-    def __init__(self):
+    def __init__(self, type_spec: Optional[_structures.TypeSpecType] = None):
         self._cached_bytes: Optional[bytes] = None
+        self._type_spec = type_spec
 
     @abc.abstractmethod
     def download(self, path: str):

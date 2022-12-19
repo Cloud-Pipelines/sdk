@@ -333,6 +333,44 @@ class LaunchersTestCase(unittest.TestCase):
                     data=LaunchersTestCase,
                 )
 
+    def test_execution_input_artifacts_have_types(self):
+        with runners.InteractiveMode():
+            execution: runners.ContainerExecution = _produce_and_consume_component(
+                input_string="input_string",
+                input_integer=37,
+                input_float=2.73,
+                input_boolean=False,
+                input_list=["item"],
+                input_dict={"key1": "value1"},
+            )
+            # Checking the input artifact types
+            input_arguments = execution.input_arguments
+            self.assertEqual(input_arguments["input_string"]._type_spec, "String")
+            self.assertEqual(input_arguments["input_integer"]._type_spec, "Integer")
+            self.assertEqual(input_arguments["input_float"]._type_spec, "Float")
+            self.assertEqual(input_arguments["input_boolean"]._type_spec, "Boolean")
+            self.assertEqual(input_arguments["input_list"]._type_spec, "JsonArray")
+            self.assertEqual(input_arguments["input_dict"]._type_spec, "JsonObject")
+
+    def test_execution_output_artifacts_have_types(self):
+        with runners.InteractiveMode():
+            execution: runners.ContainerExecution = _produce_and_consume_component()
+            # Checking the output artifact types
+            self.assertEqual(execution.outputs["output_string"]._type_spec, "String")
+            self.assertEqual(execution.outputs["output_integer"]._type_spec, "Integer")
+            self.assertEqual(execution.outputs["output_float"]._type_spec, "Float")
+            self.assertEqual(execution.outputs["output_boolean"]._type_spec, "Boolean")
+            self.assertEqual(execution.outputs["output_list"]._type_spec, "JsonArray")
+            self.assertEqual(execution.outputs["output_dict"]._type_spec, "JsonObject")
+            execution.wait_for_completion()
+            # Checking again since the future-based execution output artifacts are replaced after success.
+            self.assertEqual(execution.outputs["output_string"]._type_spec, "String")
+            self.assertEqual(execution.outputs["output_integer"]._type_spec, "Integer")
+            self.assertEqual(execution.outputs["output_float"]._type_spec, "Float")
+            self.assertEqual(execution.outputs["output_boolean"]._type_spec, "Boolean")
+            self.assertEqual(execution.outputs["output_list"]._type_spec, "JsonArray")
+            self.assertEqual(execution.outputs["output_dict"]._type_spec, "JsonObject")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

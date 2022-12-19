@@ -65,29 +65,28 @@ class Runner:
             relative_path="uuid=" + uuid.uuid4().hex
         ).make_subpath(relative_path="data")
 
-    # TODO: Add type to the artifact
-    def _upload_constant_data_as_artifact(self, data: bytes) -> "_StorageArtifact":
-        uri_accessor = self._generate_artifact_data_uri()
-        uri_accessor.get_writer().upload_from_bytes(data=data)
-        artifact = _StorageArtifact(uri_reader=uri_accessor.get_reader())
-        return artifact
-
-    # TODO: Add type to the artifact
-    def _create_artifact_from_local_data(self, path: str) -> "_StorageArtifact":
+    def _create_artifact_from_local_data(
+        self, path: str, type_spec: Optional[_structures.TypeSpecType]
+    ) -> "_StorageArtifact":
         uri_accessor = self._generate_artifact_data_uri()
         uri_accessor.get_writer().upload_from_path(path=path)
-        artifact = _StorageArtifact(uri_reader=uri_accessor.get_reader())
+        artifact = _StorageArtifact(
+            uri_reader=uri_accessor.get_reader(), type_spec=type_spec
+        )
         return artifact
 
-    # TODO: Add type to the artifact
     def _create_artifact_from_object(
         self, obj: Any, type_spec: Optional[_structures.TypeSpecType]
     ) -> "_StorageArtifact":
         with tempfile.TemporaryDirectory() as temp_dir:
             # We could make the last path part anything, not just "data".
             data_path = os.path.join(temp_dir, _ARTIFACT_PATH_LAST_PART)
-            _serialization.save(obj=obj, path=data_path, type_spec=type_spec)
-            return self._create_artifact_from_local_data(path=data_path)
+            type_spec = _serialization.save(
+                obj=obj, path=data_path, type_spec=type_spec
+            )
+            return self._create_artifact_from_local_data(
+                path=data_path, type_spec=type_spec
+            )
 
     def _run_graph_task(
         self,
@@ -124,11 +123,11 @@ class Runner:
             # resolving task arguments
             task_input_artifacts = {}
             for input_name, argument in child_task_spec.arguments.items():
-                artifact: _StorageArtifact = None
+                artifact: Union[str, artifact_stores.Artifact]
                 if isinstance(argument, str):
-                    artifact = self._upload_constant_data_as_artifact(
-                        data=argument.encode("utf-8")
-                    )
+                    # Not uploading the argument here. We'll do this it in _run_task.
+                    # Artifact needs type and we do not know the input type yet since component is not loaded yet.
+                    artifact = argument
                 elif isinstance(argument, structures.GraphInputArgument):
                     artifact = graph_input_artifacts[argument.graph_input.input_name]
                 elif isinstance(argument, structures.TaskOutputArgument):
@@ -303,11 +302,17 @@ class Runner:
             output_names = [
                 output_spec.name for output_spec in component_spec.outputs or []
             ]
+            output_specs = {
+                output_spec.name: output_spec
+                for output_spec in component_spec.outputs or []
+            }
             output_artifact_futures = {
                 output_name: futures.Future() for output_name in output_names
             }
             output_future_artifacts = {
-                output_name: _FutureStorageArtifact(future)
+                output_name: _FutureStorageArtifact(
+                    future, type_spec=output_specs[output_name].type
+                )
                 for output_name, future in output_artifact_futures.items()
             }
 
@@ -406,7 +411,8 @@ class Runner:
                         for output_name, future in output_artifact_futures.items():
                             output_uri = output_uris[output_name]
                             output_artifact = _StorageArtifact(
-                                uri_reader=output_uri.get_reader()
+                                uri_reader=output_uri.get_reader(),
+                                type_spec=output_specs[output_name].type,
                             )
                             future.set_result(output_artifact)
                     else:
@@ -599,7 +605,9 @@ class _StorageArtifact(artifact_stores.Artifact):
     def __init__(
         self,
         uri_reader: storage_providers.UriReader,
+        type_spec: Optional[_structures.TypeSpecType] = None,
     ):
+        super().__init__(type_spec=type_spec)
         self._uri_reader = uri_reader
 
     def download(self, path: str):
@@ -610,7 +618,12 @@ class _StorageArtifact(artifact_stores.Artifact):
 
 
 class _FutureStorageArtifact(artifact_stores.Artifact):
-    def __init__(self, artifact_future: futures.Future):
+    def __init__(
+        self,
+        artifact_future: futures.Future,
+        type_spec: Optional[_structures.TypeSpecType] = None,
+    ):
+        super().__init__(type_spec=type_spec)
         self._artifact_future = artifact_future
 
     def _get_artifact(self) -> _StorageArtifact:
