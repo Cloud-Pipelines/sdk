@@ -610,7 +610,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         super().__init__(type_spec=type_spec)
         self._uri_reader = uri_reader
 
-    def download(self, path: str):
+    def _download_to_path(self, path: str):
         self._uri_reader.download_to_path(path=path)
 
     def _download_as_bytes(self) -> bytes:
@@ -629,8 +629,8 @@ class _FutureStorageArtifact(artifact_stores.Artifact):
     def _get_artifact(self) -> _StorageArtifact:
         return self._artifact_future.result()
 
-    def download(self, path: str):
-        self._get_artifact().download(path=path)
+    def _download_to_path(self, path: str):
+        self._get_artifact()._download_to_path(path=path)
 
     def _download_as_bytes(self) -> bytes:
         return self._get_artifact()._download_as_bytes()

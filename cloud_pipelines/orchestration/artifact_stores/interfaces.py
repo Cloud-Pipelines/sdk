@@ -1,4 +1,6 @@
 import abc
+import os
+import tempfile
 from typing import Optional
 
 from ..._components.components import _structures
@@ -14,8 +16,15 @@ class Artifact(abc.ABC):
         self._cached_bytes: Optional[bytes] = None
         self._type_spec = type_spec
 
+    def download(self, path: Optional[str] = None) -> str:
+        if not path:
+            temp_dir = tempfile.mkdtemp()
+            path = os.path.join(temp_dir, "data")
+        self._download_to_path(path=path)
+        return path
+
     @abc.abstractmethod
-    def download(self, path: str):
+    def _download_to_path(self, path: str):
         raise NotImplementedError
 
     @abc.abstractmethod
