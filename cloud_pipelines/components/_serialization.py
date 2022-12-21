@@ -5,6 +5,8 @@ import warnings
 from .._components.components import _data_passing as _internal_data_passing
 from .._components.components import _structures
 
+from . import _serializers
+
 
 def save(
     obj: Any,
@@ -47,3 +49,21 @@ def _get_full_class_name(obj) -> str:
     if module is not None and module != "__builtin__":
         name = module + "." + name
     return name
+
+
+def _get_deserializer_for_type_spec(type_spec: _structures.TypeSpecType):
+    type_name = _type_spec_to_type_name(type_spec=type_spec)
+    type_name = _serializers._alias_type_name_to_canonical.get(type_name, type_name)
+    deserializer = _serializers._deserializers.get(type_name)
+    return deserializer
+
+
+def load(
+    path: str,
+    type_spec: _structures.TypeSpecType,
+) -> Any:
+    deserializer = _get_deserializer_for_type_spec(type_spec=type_spec)
+    if not deserializer:
+        raise ValueError(f"Could not find deserializer for type spec: {type_spec}")
+    string = pathlib.Path(path).read_text()
+    return deserializer(string)
