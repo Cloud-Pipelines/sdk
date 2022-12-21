@@ -371,6 +371,25 @@ class LaunchersTestCase(unittest.TestCase):
             self.assertEqual(execution.outputs["output_list"]._type_spec, "JsonArray")
             self.assertEqual(execution.outputs["output_dict"]._type_spec, "JsonObject")
 
+    def test_artifact_materialization(self):
+        with runners.InteractiveMode():
+            execution: runners.ContainerExecution = _produce_and_consume_component(
+                input_string="string",
+                input_integer=37,
+                input_float=2.73,
+                input_boolean=False,
+                input_list=["a", "b"],
+                input_dict={"k": "v"},
+            )
+            self.assertEqual(execution.outputs["output_string"].materialize(), "string")
+            self.assertEqual(execution.outputs["output_integer"].materialize(), 37)
+            self.assertEqual(execution.outputs["output_float"].materialize(), 2.73)
+            self.assertEqual(execution.outputs["output_boolean"].materialize(), False)
+            self.assertEqual(execution.outputs["output_list"].materialize(), ["a", "b"])
+            self.assertEqual(execution.outputs["output_dict"].materialize(), {"k": "v"})
+            with self.assertRaises(ValueError):
+                execution.outputs["output_model"].materialize()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

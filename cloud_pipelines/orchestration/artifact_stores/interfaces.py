@@ -4,6 +4,7 @@ import tempfile
 from typing import Optional
 
 from ..._components.components import _structures
+from ...components import _serialization
 
 
 __all__ = [
@@ -30,6 +31,13 @@ class Artifact(abc.ABC):
     @abc.abstractmethod
     def _download_as_bytes(self) -> bytes:
         raise NotImplementedError
+
+    def materialize(self):
+        if not self._type_spec:
+            raise ValueError("Cannot materialize artifact that has no type.")
+        path = self.download()
+        obj = _serialization.load(path=path, type_spec=self._type_spec)
+        return obj
 
     # def read_text(self) -> str:
     #     if self._cached_bytes is None:
