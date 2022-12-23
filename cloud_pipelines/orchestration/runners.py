@@ -465,8 +465,8 @@ class Runner:
 class InteractiveMode:
     def __init__(
         self,
-        task_launcher: launchers.ContainerTaskLauncher = None,
-        root_uri: storage_providers.UriAccessor = None,
+        task_launcher: Optional[launchers.ContainerTaskLauncher] = None,
+        root_uri: Optional[storage_providers.UriAccessor] = None,
         wait_for_completion_on_exit: bool = True,
     ):
         if not task_launcher:
@@ -491,7 +491,7 @@ class InteractiveMode:
     def __enter__(self):
         def _create_execution_from_component_and_arguments(
             arguments: Mapping[str, Any],
-            component_ref: structures.ComponentReference = None,
+            component_ref: structures.ComponentReference,
             **kwargs,
         ) -> Execution:
             task_spec = structures.TaskSpec(
@@ -528,8 +528,8 @@ class InteractiveMode:
 
     @staticmethod
     def activate(
-        task_launcher: launchers.ContainerTaskLauncher = None,
-        root_uri: storage_providers.UriAccessor = None,
+        task_launcher: Optional[launchers.ContainerTaskLauncher] = None,
+        root_uri: Optional[storage_providers.UriAccessor] = None,
         wait_for_completion_on_exit: bool = True,
     ):
         if InteractiveMode._interactive_mode:
@@ -583,8 +583,7 @@ class ExecutionStatus(enum.Enum):
 class Execution:
     task_spec: structures.TaskSpec
     input_arguments: Mapping[str, artifact_stores.Artifact]
-    outputs: Optional[Mapping[str, artifact_stores.Artifact]] = None
-    _waiters: Sequence[Callable[[], None]] = None
+    outputs: Mapping[str, artifact_stores.Artifact]
 
     def wait_for_completion(self):
         for waiter in self._waiters or []:
@@ -602,6 +601,7 @@ class ContainerExecution(Execution):
     end_time: Optional[datetime.datetime] = None
     exit_code: Optional[int] = None
     log: Optional[launchers.ProcessLog] = None
+    _waiters: Optional[Sequence[Callable[[], Any]]] = None
     # TODO: Launcher-specific info
 
     def __repr__(self):
@@ -612,18 +612,21 @@ class ContainerExecution(Execution):
 
 @dataclasses.dataclass
 class GraphExecution(Execution):
-    task_executions: Mapping[str, Execution] = None
+    task_executions: Mapping[str, Execution]
+    _waiters: Optional[Sequence[Callable[[], Any]]] = None
 
 
 class ExecutionFailedError(Exception):
     def __init__(self, execution):
         self.execution = execution
+        super().__init__(self, execution)
 
 
 class UpstreamExecutionFailedError(Exception):
     def __init__(self, execution, upstream_execution):
         self.execution = execution
         self.upstream_execution = upstream_execution
+        super().__init__(self, execution, upstream_execution)
 
 
 class _StorageArtifact(artifact_stores.Artifact):
