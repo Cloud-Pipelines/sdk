@@ -5,6 +5,7 @@ import enum
 import logging
 import tempfile
 import os
+import typing
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 import uuid
 
@@ -186,6 +187,7 @@ class Runner:
         ],
         arguments: Optional[Mapping[str, Union[str, artifact_stores.Artifact]]] = None,
         annotations: Optional[Dict[str, Any]] = None,
+        task_name: Optional[str] = None,
     ):
         component_ref: structures.ComponentReference
         if isinstance(component, structures.ComponentReference):
@@ -225,6 +227,7 @@ class Runner:
         return self.run_task(
             task_spec=task_spec,
             input_arguments=arguments,
+            task_name=task_name,
         )
 
     def run_task(
@@ -233,6 +236,7 @@ class Runner:
         input_arguments: Optional[
             Mapping[str, Union[str, artifact_stores.Artifact]]
         ] = None,
+        task_name: Optional[str] = None,
     ) -> "Execution":
         for argument in (task_spec.arguments or {}).values():
             if isinstance(argument, str):
@@ -254,6 +258,7 @@ class Runner:
         return self._run_task(
             task_spec=task_spec,
             input_arguments=full_input_arguments,
+            task_id_stack=[task_name] if task_name else None,
         )
 
     def _run_task(
@@ -295,6 +300,9 @@ class Runner:
             )
             for input_name, argument in input_arguments.items()
         }
+
+        if not task_id_stack:
+            task_id_stack = [component_spec.name or "Task"]
 
         if isinstance(
             component_spec.implementation, structures.ContainerImplementation
@@ -478,7 +486,7 @@ class InteractiveMode:
         )
         self._old_container_task_constructor = None
         self._wait_for_completion_on_exit = wait_for_completion_on_exit
-        self._executions: Sequence[Execution] = []
+        self._executions: Dict[str, Execution] = {}
 
     def __enter__(self):
         def _create_execution_from_component_and_arguments(
@@ -489,11 +497,16 @@ class InteractiveMode:
             task_spec = structures.TaskSpec(
                 component_ref=component_ref,
             )
+            task_id = component_ref.spec.name if component_ref.spec else "Task"
+            task_id = _make_name_unique_by_adding_index(
+                task_id, self._executions.keys(), " "
+            )
             execution = self._runner.run_task(
                 task_spec=task_spec,
                 input_arguments=arguments,
+                task_name=task_id,
             )
-            self._executions.append(execution)
+            self._executions[task_id] = execution
             return execution
 
         from .._components.components import _components
@@ -508,7 +521,7 @@ class InteractiveMode:
 
         _components._container_task_constructor = self._old_container_task_constructor
         if self._wait_for_completion_on_exit:
-            for execution in self._executions:
+            for execution in self._executions.values():
                 execution.wait_for_completion()
 
     _interactive_mode: Optional["InteractiveMode"] = None
@@ -540,6 +553,18 @@ class InteractiveMode:
 
 activate_interactive_mode = InteractiveMode.activate
 deactivate_interactive_mode = InteractiveMode.deactivate
+
+
+def _make_name_unique_by_adding_index(
+    name: str, collection: typing.Container[str], delimiter: str
+):
+    unique_name = name
+    if unique_name in collection:
+        for i in range(2, 100000):
+            unique_name = name + delimiter + str(i)
+            if unique_name not in collection:
+                break
+    return unique_name
 
 
 class ExecutionStatus(enum.Enum):
