@@ -39,6 +39,9 @@ class Artifact(abc.ABC):
         obj = _serialization.load(path=path, type_spec=self._type_spec)
         return obj
 
+    def __repr__(self):
+        return f"Artifact(type_spec={self._type_spec})"
+
     # def read_text(self) -> str:
     #     if self._cached_bytes is None:
     #         self._cached_bytes = self._download_as_bytes()
