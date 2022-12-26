@@ -72,8 +72,7 @@ class GoogleCloudBatchLauncher(interfaces.ContainerTaskLauncher):
         container_output_paths_map = {}
         mount_path_to_gcs_uri = {}
         container_volume_mounts = []
-        for name in input_names:
-            uri_accessor = input_uri_readers[name]
+        for name, uri_accessor in input_uri_readers.items():
             uri = _assert_type(
                 uri_accessor.uri, google_cloud_storage.GoogleCloudStorageUri
             ).uri
@@ -84,8 +83,7 @@ class GoogleCloudBatchLauncher(interfaces.ContainerTaskLauncher):
             mount_path_to_gcs_uri[container_dir] = uri_dir
             container_volume_mounts.append(f"{container_dir}:{container_dir}:ro")
 
-        for name in output_names:
-            uri_accessor = output_uri_writers[name]
+        for name, uri_accessor in output_uri_writers.items():
             uri = _assert_type(
                 uri_accessor.uri, google_cloud_storage.GoogleCloudStorageUri
             ).uri
