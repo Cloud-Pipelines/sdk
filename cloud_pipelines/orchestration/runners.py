@@ -442,7 +442,10 @@ class Runner:
                     execution.status = ExecutionStatus.SystemError
                     execution.end_time = datetime.datetime.utcnow()
                     execution._error_message = repr(ex)
-                    raise ExecutionFailedError(execution=execution) from ex
+                    exception = ExecutionFailedError(execution=execution)
+                    for future in output_artifact_futures.values():
+                        future.set_exception(exception)
+                    raise exception from ex
 
             container_launch_future = self._futures_executor.submit(
                 launch_container_task_and_set_output_artifact_futures
