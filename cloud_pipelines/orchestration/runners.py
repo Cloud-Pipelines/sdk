@@ -590,11 +590,7 @@ class Execution:
 
     def wait_for_completion(self):
         for waiter in self._waiters or []:
-            try:
-                waiter()
-            except:
-                pass
-        self._waiters = []
+            waiter()
 
 
 @dataclasses.dataclass
