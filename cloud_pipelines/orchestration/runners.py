@@ -97,7 +97,7 @@ class Runner:
             str,
             Union[
                 "_StorageArtifact",
-                "_FutureStorageArtifact",
+                "_FutureExecutionOutputArtifact",
             ],
         ],
         task_id_stack: List[str],
@@ -269,7 +269,7 @@ class Runner:
             Union[
                 str,
                 "_StorageArtifact",
-                "_FutureStorageArtifact",
+                "_FutureExecutionOutputArtifact",
             ],
         ],
         task_id_stack: Optional[List[str]] = None,
@@ -314,15 +314,7 @@ class Runner:
                 output_spec.name: output_spec
                 for output_spec in component_spec.outputs or []
             }
-            output_artifact_futures = {
-                output_name: futures.Future() for output_name in output_names
-            }
-            output_future_artifacts = {
-                output_name: _FutureStorageArtifact(
-                    future, type_spec=output_specs[output_name].type
-                )
-                for output_name, future in output_artifact_futures.items()
-            }
+            output_artifacts = {}
 
             start_time = datetime.datetime.utcnow()
             execution = ContainerExecution(
@@ -330,8 +322,15 @@ class Runner:
                 task_spec=task_spec,
                 input_arguments=input_artifacts,
                 status=ExecutionStatus.WaitingForUpstream,
-                outputs=output_future_artifacts,
+                outputs=output_artifacts,
             )
+
+            for output_name in output_names:
+                output_artifacts[output_name] = _FutureExecutionOutputArtifact(
+                    execution=execution,
+                    output_name=output_name,
+                    type_spec=output_specs[output_name].type,
+                )
 
             def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
                 if task_id_stack:
@@ -363,7 +362,7 @@ class Runner:
                         resolved_input_artifacts = {
                             input_name: (
                                 argument._get_artifact()
-                                if isinstance(argument, _FutureStorageArtifact)
+                                if isinstance(argument, _FutureExecutionOutputArtifact)
                                 else argument
                             )
                             for input_name, argument in input_artifacts.items()
@@ -381,8 +380,6 @@ class Runner:
                             execution=execution,
                             upstream_execution=failed_upstream_execution,
                         )
-                        for future in output_artifact_futures.values():
-                            future.set_exception(exception)
                         raise exception  # from e
 
                     input_uri_readers = {
@@ -416,19 +413,15 @@ class Runner:
                     execution.log = container_execution_result.log
                     if container_execution_result.exit_code == 0:
                         execution.status = ExecutionStatus.Succeeded
-                        for output_name, future in output_artifact_futures.items():
-                            output_uri = output_uris[output_name]
+
+                        for output_name, output_uri in output_uris.items():
                             output_artifact = _StorageArtifact(
                                 uri_reader=output_uri.get_reader(),
                                 type_spec=output_specs[output_name].type,
                             )
-                            future.set_result(output_artifact)
+                            output_artifacts[output_name] = output_artifact
                     else:
                         execution.status = ExecutionStatus.Failed
-                        for future in output_artifact_futures.values():
-                            future.set_exception(
-                                ExecutionFailedError(execution=execution)
-                            )
                     log_message(
                         message=f"Container task completed with status: {execution.status.name}"
                     )
@@ -442,10 +435,7 @@ class Runner:
                     execution.status = ExecutionStatus.SystemError
                     execution.end_time = datetime.datetime.utcnow()
                     execution._error_message = repr(ex)
-                    exception = ExecutionFailedError(execution=execution)
-                    for future in output_artifact_futures.values():
-                        future.set_exception(exception)
-                    raise exception from ex
+                    raise ExecutionFailedError(execution=execution) from ex
 
             container_launch_future = self._futures_executor.submit(
                 launch_container_task_and_set_output_artifact_futures
@@ -644,17 +634,22 @@ class _StorageArtifact(artifact_stores.Artifact):
         return self._uri_reader.download_as_bytes()
 
 
-class _FutureStorageArtifact(artifact_stores.Artifact):
+class _FutureExecutionOutputArtifact(artifact_stores.Artifact):
     def __init__(
         self,
-        artifact_future: futures.Future,
+        execution: Execution,
+        output_name: str,
         type_spec: Optional[_structures.TypeSpecType] = None,
     ):
         super().__init__(type_spec=type_spec)
-        self._artifact_future = artifact_future
+        self._execution = execution
+        self._output_name = output_name
 
     def _get_artifact(self) -> _StorageArtifact:
-        return self._artifact_future.result()
+        self._execution.wait_for_completion()
+        artifact = self._execution.outputs[self._output_name]
+        assert isinstance(artifact, _StorageArtifact)
+        return artifact
 
     def _download_to_path(self, path: str):
         self._get_artifact()._download_to_path(path=path)
