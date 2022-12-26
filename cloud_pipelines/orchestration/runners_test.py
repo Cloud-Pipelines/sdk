@@ -228,21 +228,21 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution.wait_for_completion()
 
-    @unittest.skipUnless(
+    @unittest.skipIf(
         condition=_GOOGLE_CLOUD_STORAGE_ROOT_URI is None,
         reason="Root GCS URI is not set",
     )
     def test_google_cloud_batch_launcher(self):
+        if not _GOOGLE_CLOUD_STORAGE_ROOT_URI:
+            self.skipTest(reason="Root GCS URI is not set")
+            return
+
         from cloud_pipelines.orchestration.launchers.google_cloud_batch_launcher import (
             GoogleCloudBatchLauncher,
         )
         from cloud_pipelines.orchestration.storage_providers.google_cloud_storage import (
             GoogleCloudStorageProvider,
         )
-
-        if not _GOOGLE_CLOUD_STORAGE_ROOT_URI:
-            self.skipTest(reason="Root GCS URI is not set")
-            return
 
         pipeline_task = _build_nested_graph_pipeline_task()
 
