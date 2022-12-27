@@ -124,13 +124,16 @@ class Runner:
             # resolving task arguments
             task_input_artifacts = {}
             for input_name, argument in child_task_spec.arguments.items():
-                artifact: Union[str, artifact_stores.Artifact]
+                artifact: Optional[Union[str, artifact_stores.Artifact]]
                 if isinstance(argument, str):
                     # Not uploading the argument here. We'll do this it in _run_task.
                     # Artifact needs type and we do not know the input type yet since component is not loaded yet.
                     artifact = argument
                 elif isinstance(argument, structures.GraphInputArgument):
-                    artifact = graph_input_artifacts[argument.graph_input.input_name]
+                    # Graph inputs can have no arguments passed to them
+                    artifact = graph_input_artifacts.get(
+                        argument.graph_input.input_name
+                    )
                 elif isinstance(argument, structures.TaskOutputArgument):
                     artifact = task_id_to_output_artifacts_map[
                         argument.task_output.task_id
@@ -141,7 +144,8 @@ class Runner:
                             str(type(argument).__name__), str(argument)
                         )
                     )
-                task_input_artifacts[input_name] = artifact
+                if artifact is not None:
+                    task_input_artifacts[input_name] = artifact
 
             child_task_execution = self._run_task(
                 task_spec=child_task_spec,
@@ -288,6 +292,35 @@ class Runner:
         input_specs = {
             input_spec.name: input_spec for input_spec in component_spec.inputs or []
         }
+
+        # Important: We need to take care of the optional graph component inputs.
+        # For container components we do not pass anything for missing arguments to optional inputs.
+        # However for graph components we need to figure out how to make child components with required inputs receive the default.
+        # For an *optional* *graph* component input, we need to set the missing argument to the input default *if it exists*.
+        # optional+, default+, container => do not pass argument
+        # optional+, default+, graph => use default (*special case*)
+        # optional+, default- => do not pass argument
+        # optional-, default+ => use default (for container components, resolve_command_line can handle this)
+        # optional-, default- => error
+        input_arguments = dict(input_arguments)
+        for input_spec in component_spec.inputs or []:
+            if input_spec.name not in input_arguments:
+                if input_spec.optional:
+                    if (
+                        isinstance(
+                            component_spec.implementation,
+                            structures.GraphImplementation,
+                        )
+                        and input_spec.default is not None
+                    ):
+                        input_arguments[input_spec.name] = input_spec.default
+                else:
+                    if input_spec.default is None:
+                        raise ValueError(
+                            f'No argument provided for the required input "{input_spec.name}" with no default.'
+                        )
+                    else:
+                        input_arguments[input_spec.name] = input_spec.default
 
         # TODO: Check artifact type compatibility. Can we share this between compilation and interactive?
         input_artifacts = {
