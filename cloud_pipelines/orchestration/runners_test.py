@@ -203,7 +203,7 @@ class LaunchersTestCase(unittest.TestCase):
             execution.wait_for_completion()
 
     def test_local_docker_launcher(self):
-        pipeline_task = _build_nested_graph_pipeline_task()
+        pipeline_task = _build_data_passing_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
@@ -216,7 +216,7 @@ class LaunchersTestCase(unittest.TestCase):
             execution.wait_for_completion()
 
     def test_local_kubernetes_launcher(self):
-        pipeline_task = _build_nested_graph_pipeline_task()
+        pipeline_task = _build_data_passing_pipeline_task()
 
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
