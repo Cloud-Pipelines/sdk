@@ -49,6 +49,13 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
             except:
                 k8s_config.load_kube_config()
             self._k8s_client = k8s_client.ApiClient()
+        try:
+            k8s_client.VersionApi(self._k8s_client).get_code()
+        except Exception as ex:
+            raise RuntimeError(
+                "Connection to the Kubernetes cluster does not seem to be working."
+                " Please make sure that `kubectl cluster-info` executes without errors."
+            ) from ex
 
     def launch_container_task(
         self,
