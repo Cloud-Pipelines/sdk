@@ -99,11 +99,6 @@ def _build_data_passing_graph_component():
     return components.create_graph_component_from_pipeline_func(pipeline3_func)
 
 
-def _build_data_passing_pipeline_task():
-    data_passing_op = _build_data_passing_graph_component()
-    return data_passing_op(graph_input_1="graph_input_1")
-
-
 def _build_nested_graph_component():
     pipeline_op = _build_data_passing_graph_component()
 
@@ -119,11 +114,6 @@ def _build_nested_graph_component():
         nested_pipeline
     )
     return nested_pipeline_op
-
-
-def _build_nested_graph_pipeline_task():
-    nested_pipeline_op = _build_nested_graph_component()
-    return nested_pipeline_op(outer_graph_input_1="outer_graph_input_1")
 
 
 @components.create_component_from_func
@@ -190,7 +180,8 @@ def _produce_and_consume_component(
 
 class LaunchersTestCase(unittest.TestCase):
     def test_local_environment_launcher(self):
-        pipeline_task = _build_nested_graph_pipeline_task()
+        nested_pipeline_op = _build_nested_graph_component()
+        pipeline_task = nested_pipeline_op(outer_graph_input_1="outer_graph_input_1")
 
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
@@ -203,28 +194,30 @@ class LaunchersTestCase(unittest.TestCase):
             execution.wait_for_completion()
 
     def test_local_docker_launcher(self):
-        pipeline_task = _build_data_passing_pipeline_task()
+        component = _build_data_passing_graph_component()
 
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
                 task_launcher=DockerContainerLauncher(),
                 root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
             )
-            execution = runner.run_task(
-                task_spec=pipeline_task,
+            execution = runner.run_component(
+                component=component,
+                arguments=dict(graph_input_1="graph_input_1"),
             )
             execution.wait_for_completion()
 
     def test_local_kubernetes_launcher(self):
-        pipeline_task = _build_data_passing_pipeline_task()
+        component = _build_data_passing_graph_component()
 
         with tempfile.TemporaryDirectory() as output_dir:
             runner = runners.Runner(
                 task_launcher=LocalKubernetesContainerLauncher(),
                 root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
             )
-            execution = runner.run_task(
-                task_spec=pipeline_task,
+            execution = runner.run_component(
+                component=component,
+                arguments=dict(graph_input_1="graph_input_1"),
             )
             execution.wait_for_completion()
 
@@ -244,7 +237,7 @@ class LaunchersTestCase(unittest.TestCase):
             GoogleCloudStorageProvider,
         )
 
-        pipeline_task = _build_nested_graph_pipeline_task()
+        component = _build_data_passing_graph_component()
 
         runner = runners.Runner(
             task_launcher=GoogleCloudBatchLauncher(),
@@ -252,8 +245,8 @@ class LaunchersTestCase(unittest.TestCase):
                 uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI
             ),
         )
-        execution = runner.run_task(
-            task_spec=pipeline_task,
+        execution = runner.run_component(
+            component=component,
         )
         execution.wait_for_completion()
 
