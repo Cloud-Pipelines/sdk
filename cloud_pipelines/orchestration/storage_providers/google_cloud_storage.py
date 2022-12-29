@@ -1,3 +1,4 @@
+import base64
 import dataclasses
 import logging
 import os
@@ -104,3 +105,45 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
         source_blob = storage.Blob.from_string(uri=source_uri_str, client=self._client)
         _LOGGER.debug(f"Downloading data from {source_uri_str}")
         return source_blob.download_as_bytes()
+
+    def get_info(self, uri: GoogleCloudStorageUri) -> interfaces.DataInfo:
+        return self._get_info_from_uri(uri.uri)
+
+    def _get_info_from_uri(self, uri: str) -> interfaces.DataInfo:
+        file_info_list = []
+        blob_or_dir = storage.Blob.from_string(uri=uri, client=self._client)
+        if blob_or_dir.exists():
+            blob = blob_or_dir
+            blob.reload()
+            return interfaces.DataInfo(
+                total_size=blob.size,
+                is_dir=False,
+                # blob.md5_hash is a base64-encoded hash digest byte array. E.g. "1B2M2Y8AsgTpgAmY7PhCfg=="
+                hashes={"md5": base64.decodebytes(blob.md5_hash.encode("ascii")).hex()},
+            )
+        else:
+            # Note: Each empty dir root is represented as a 0-byte object with trailing slash:
+            # _FileInfo(path='', size=0, hashes={'md5': 'd41d8cd98f00b204e9800998ecf8427e'}),
+            # _FileInfo(path='subdir/', size=0, hashes={'md5': 'd41d8cd98f00b204e9800998ecf8427e'}),
+            dir_prefix = blob_or_dir.name.rstrip("/") + "/"
+            for blob in self._client.list_blobs(
+                bucket_or_name=blob_or_dir.bucket, prefix=dir_prefix
+            ):
+                blob.reload()
+                assert blob.name.startswith(dir_prefix)
+                relative_source_blob_name = blob.name[len(dir_prefix) :]
+                file_info_list.append(
+                    interfaces._FileInfo(
+                        path=relative_source_blob_name,
+                        size=blob.size,
+                        hashes={
+                            # blob.md5_hash is a base64-encoded hash digest byte array. E.g. "1B2M2Y8AsgTpgAmY7PhCfg=="
+                            "md5": base64.decodebytes(
+                                blob.md5_hash.encode("ascii")
+                            ).hex()
+                        },
+                    )
+                )
+            data_info = interfaces._make_data_info_for_dir(file_info_list)
+            data_info._file_info_list = file_info_list
+            return data_info
