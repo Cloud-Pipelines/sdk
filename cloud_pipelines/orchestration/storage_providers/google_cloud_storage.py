@@ -47,6 +47,11 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
         destination_blob.upload_from_filename(filename=source_file_path, checksum="md5")
 
     def _upload_dir(self, source_dir_path: str, destination_dir_uri: str):
+        # Creating the directory object (zero-byte object with name ending in slash)
+        storage.Blob.from_string(
+            uri=destination_dir_uri.rstrip("/") + "/", client=self._client
+        ).upload_from_string(data="", checksum="md5")
+
         for dir_entry_name in os.listdir(source_dir_path):
             source_path = os.path.join(source_dir_path, dir_entry_name)
             destination_uri = destination_dir_uri.rstrip("/") + "/" + dir_entry_name
