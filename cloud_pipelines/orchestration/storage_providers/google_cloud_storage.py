@@ -97,8 +97,13 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
                 destination_file_path = os.path.join(
                     destination_path, relative_source_blob_name
                 )
-                os.makedirs(os.path.dirname(destination_file_path), exist_ok=True)
-                source_blob.download_to_filename(filename=destination_file_path)
+                if source_blob.name.endswith("/"):
+                    # It's a zero-size object that represents a directory
+                    assert source_blob.size == 0
+                    os.makedirs(destination_file_path, exist_ok=True)
+                else:
+                    os.makedirs(os.path.dirname(destination_file_path), exist_ok=True)
+                    source_blob.download_to_filename(filename=destination_file_path)
 
     def download_bytes(self, source_uri: GoogleCloudStorageUri) -> bytes:
         source_uri_str = source_uri.uri
