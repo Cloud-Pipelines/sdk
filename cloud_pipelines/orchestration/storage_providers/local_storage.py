@@ -66,54 +66,53 @@ class LocalStorageProvider(interfaces.StorageProvider):
         return pathlib.Path(uri.path).exists()
 
     def get_info(self, uri: LocalUri) -> interfaces.DataInfo:
-        return self._get_info_from_path(uri.path)
+        return _get_data_info_from_path(uri.path)
 
-    def _get_info_from_path(self, path: str) -> interfaces.DataInfo:
-        if not os.path.islink(path) and os.path.isdir(path):
-            file_info_list = []
-            empty_hashes = _calculate_empty_hashes(hash_names=_DATA_HASHES)
-            for dir_path, _, file_names in os.walk(path, followlinks=False):
-                # Handling the directories.
-                # Directories (at least empty) need to be part of the hash.
-                # Representing a directory as an empty object with path ending with slash
-                # This is consistent with how AWS, Azure and GCS represent the directories.
-                relative_dir_path = os.path.relpath(dir_path, path)
-                # Directory entries end with slash
-                canonical_dir_path = relative_dir_path.replace(os.path.sep, "/") + "/"
-                if canonical_dir_path == "./":
-                    # Should we skip the root directory entry or keep it?
-                    # One small advantage of keeping it is that this can help us differentiate between an empty directory and nothing.
-                    canonical_dir_path = ""
-                dir_file_info = interfaces._FileInfo(
-                    path=canonical_dir_path,
-                    size=0,
-                    hashes=empty_hashes,
-                )
-                file_info_list.append(dir_file_info)
-                # Handling the files.
-                for file_name in file_names:
-                    full_file_path = os.path.join(dir_path, file_name)
-                    relative_path = os.path.relpath(full_file_path, path)
-                    canonical_path = relative_path.replace(os.path.sep, "/")
-                    file_size = os.stat(full_file_path).st_size
-                    hashes = _calculate_file_hashes(
-                        path=full_file_path, hash_names=_DATA_HASHES
-                    )
-                    file_info = interfaces._FileInfo(
-                        path=canonical_path,
-                        size=file_size,
-                        hashes=hashes,
-                    )
-                    file_info_list.append(file_info)
-            data_info = interfaces._make_data_info_for_dir(file_info_list)
-            data_info._file_info_list = file_info_list
-            return data_info
-        else:
-            file_size = os.stat(path).st_size
-            hashes = _calculate_file_hashes(path=path, hash_names=_DATA_HASHES)
-            return interfaces.DataInfo(
-                total_size=file_size, is_dir=False, hashes=hashes
+
+def _get_data_info_from_path(path: str) -> interfaces.DataInfo:
+    if not os.path.islink(path) and os.path.isdir(path):
+        file_info_list = []
+        empty_hashes = _calculate_empty_hashes(hash_names=_DATA_HASHES)
+        for dir_path, _, file_names in os.walk(path, followlinks=False):
+            # Handling the directories.
+            # Directories (at least empty) need to be part of the hash.
+            # Representing a directory as an empty object with path ending with slash
+            # This is consistent with how AWS, Azure and GCS represent the directories.
+            relative_dir_path = os.path.relpath(dir_path, path)
+            # Directory entries end with slash
+            canonical_dir_path = relative_dir_path.replace(os.path.sep, "/") + "/"
+            if canonical_dir_path == "./":
+                # Should we skip the root directory entry or keep it?
+                # One small advantage of keeping it is that this can help us differentiate between an empty directory and nothing.
+                canonical_dir_path = ""
+            dir_file_info = interfaces._FileInfo(
+                path=canonical_dir_path,
+                size=0,
+                hashes=empty_hashes,
             )
+            file_info_list.append(dir_file_info)
+            # Handling the files.
+            for file_name in file_names:
+                full_file_path = os.path.join(dir_path, file_name)
+                relative_path = os.path.relpath(full_file_path, path)
+                canonical_path = relative_path.replace(os.path.sep, "/")
+                file_size = os.stat(full_file_path).st_size
+                hashes = _calculate_file_hashes(
+                    path=full_file_path, hash_names=_DATA_HASHES
+                )
+                file_info = interfaces._FileInfo(
+                    path=canonical_path,
+                    size=file_size,
+                    hashes=hashes,
+                )
+                file_info_list.append(file_info)
+        data_info = interfaces._make_data_info_for_dir(file_info_list)
+        data_info._file_info_list = file_info_list
+        return data_info
+    else:
+        file_size = os.stat(path).st_size
+        hashes = _calculate_file_hashes(path=path, hash_names=_DATA_HASHES)
+        return interfaces.DataInfo(total_size=file_size, is_dir=False, hashes=hashes)
 
 
 def _calculate_file_hashes(path: str, hash_names: List[str]) -> Dict[str, str]:
