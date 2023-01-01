@@ -135,6 +135,13 @@ def fail():
 
 
 @components.create_component_from_func
+def generate_random_number() -> int:
+    import random
+
+    return random.randint(0, 1000000)
+
+
+@components.create_component_from_func
 def _produce_and_consume_component(
     output_model_path: components.OutputPath("Model"),
     input_dataset_path: components.InputPath("Dataset") = None,
@@ -383,6 +390,19 @@ class LaunchersTestCase(unittest.TestCase):
             self.assertEqual(execution.outputs["output_dict"].materialize(), {"k": "v"})
             with self.assertRaises(ValueError):
                 execution.outputs["output_model"].materialize()
+
+    def test_reusing_execution_from_cache(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                result_art_1 = generate_random_number().outputs["Output"]
+                # Waiting for the execution completion.
+                # The execution is only cached when it's successfully finished.
+                result_art_1.materialize()
+                result_art_2 = generate_random_number().outputs["Output"]
+                self.assertEqual(result_art_1.materialize(), result_art_2.materialize())
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import enum
 import hashlib
+import json
 import logging
 import tempfile
 import os
@@ -62,6 +63,10 @@ class Runner:
         self._on_log_entry_callback = on_log_entry_callback
         self._futures_executor = futures.ThreadPoolExecutor()
         self._artifacts_root = root_uri.make_subpath(relative_path="artifacts")
+        self._db_dir = root_uri.make_subpath(relative_path="db")
+        self._executions_table_dir = self._db_dir.make_subpath(
+            relative_path="executions"
+        )
 
     def _generate_artifact_data_uri(
         self,
@@ -92,6 +97,7 @@ class Runner:
         artifact = _StorageArtifact(
             uri_reader=uri_accessor.get_reader(), type_spec=type_spec
         )
+        artifact._data_info = data_info
         return artifact
 
     def _create_artifact_from_object(
@@ -445,6 +451,33 @@ class Runner:
                         output_name: uri_accessor.get_writer()
                         for output_name, uri_accessor in output_uris.items()
                     }
+                    execution_cache_key_struct = execution._to_cache_key_dict()
+                    execution_cache_key_struct_string = json.dumps(
+                        execution_cache_key_struct, sort_keys=True
+                    )
+                    execution_cache_key = hashlib.sha256(
+                        execution_cache_key_struct_string.encode("utf-8")
+                    ).hexdigest()
+                    # TODO: Choose latest sub-folder when loading
+                    # TODO: Store executions with UUIDs and only reference them from the execution cache.
+                    cached_execution_uri_accessor = (
+                        self._executions_table_dir.make_subpath(
+                            "sha256=" + execution_cache_key
+                        ).make_subpath("execution.json")
+                    )
+                    if cached_execution_uri_accessor.get_reader().exists():
+                        log_message(message="Reused the execution from cache.")
+                        cached_execution_data = (
+                            cached_execution_uri_accessor.get_reader().download_as_bytes()
+                        )
+                        cached_execution_struct = json.loads(cached_execution_data)
+                        cached_execution = ContainerExecution._from_dict(
+                            cached_execution_struct,
+                            storage_provider=self._root_uri._provider,
+                        )
+                        execution.__dict__ = cached_execution.__dict__
+                        # TODO: Add information to the ExecutionNode to indicate that the execution was reused from cache
+                        return None  # Cached
 
                     execution.status = ExecutionStatus.Starting
                     log_message(message="Starting container task.")
@@ -466,16 +499,33 @@ class Runner:
                         execution.status = ExecutionStatus.Succeeded
 
                         for output_name, output_uri in output_uris.items():
+                            artifact_info = output_uri.get_reader().get_info()
                             output_artifact = _StorageArtifact(
                                 uri_reader=output_uri.get_reader(),
                                 type_spec=output_specs[output_name].type,
                             )
+                            output_artifact._data_info = artifact_info
                             output_artifacts[output_name] = output_artifact
                     else:
                         execution.status = ExecutionStatus.Failed
                     log_message(
                         message=f"Container task completed with status: {execution.status.name}"
                     )
+                    # Storing the successful execution in cache
+                    if execution.status == ExecutionStatus.Succeeded:
+                        execution_struct = execution._to_dict()
+                        execution_string = json.dumps(execution_struct, indent=2)
+                        reloaded_execution_struct = json.loads(execution_string)
+                        # Verifying that the serialized execution can be loaded again
+                        reloaded_execution = ContainerExecution._from_dict(
+                            reloaded_execution_struct,
+                            storage_provider=self._root_uri._provider,
+                        )
+                        execution.__dict__.update(reloaded_execution.__dict__)
+                        # TODO: Store in datetime.datetime.utcnow().timestamp subdir
+                        cached_execution_uri_accessor.get_writer().upload_from_bytes(
+                            execution_string.encode("utf-8")
+                        )
                     if execution.status == ExecutionStatus.Failed:
                         raise ExecutionFailedError(execution=execution)
                     return container_execution_result
@@ -649,6 +699,83 @@ class ContainerExecution(Execution):
         component_name = component_spec.name or "component"
         return f"""<ContainerExecution(component="{component_name}", status="{self.status.name}")>"""
 
+    def _to_dict(self) -> dict:
+        input_arguments_struct = {
+            input_name: _assert_type(artifact, _StorageArtifact)._to_dict()
+            for input_name, artifact in self.input_arguments.items()
+        }
+        outputs_struct = {}
+        for output_name, artifact in self.outputs.items():
+            if isinstance(artifact, _StorageArtifact):
+                outputs_struct[output_name] = artifact._to_dict()
+            else:
+                raise TypeError(
+                    f"Cannot serialize artifact that is not {_StorageArtifact.__name__}: {artifact}"
+                )
+        result = {
+            # Execution
+            "task_spec": self.task_spec.to_dict(),
+            "input_arguments": input_arguments_struct,
+            "outputs": outputs_struct,
+            # ContainerExecution
+            "status": self.status.name,
+            "start_time": self.start_time.isoformat(sep=" ")
+            if self.start_time
+            else None,
+            "end_time": self.end_time.isoformat(sep=" ") if self.end_time else None,
+            "exit_code": self.exit_code,
+            # "log": ...,
+        }
+        return result
+
+    def _to_cache_key_dict(self) -> dict:
+        input_artifact_uri_structs = {
+            input_name: _assert_type(
+                artifact, _StorageArtifact
+            )._uri_reader.uri.to_dict()
+            for input_name, artifact in self.input_arguments.items()
+        }
+        component_struct = self.task_spec.component_ref.spec.to_dict()
+        result = {
+            # Execution
+            "component_spec": component_struct,
+            "input_artifact_uri_structs": input_artifact_uri_structs,
+        }
+        return result
+
+    @staticmethod
+    def _from_dict(
+        dict: dict, storage_provider: storage_providers.StorageProvider
+    ) -> "ContainerExecution":
+        return ContainerExecution(
+            task_spec=structures.TaskSpec.from_dict(dict["task_spec"]),
+            input_arguments={
+                input_name: _StorageArtifact._from_dict(
+                    dict=artifact_struct, provider=storage_provider
+                )
+                for input_name, artifact_struct in dict["input_arguments"].items()
+            },
+            outputs={
+                output_name: _StorageArtifact._from_dict(
+                    dict=artifact_struct, provider=storage_provider
+                )
+                for output_name, artifact_struct in dict["outputs"].items()
+            },
+            # status=ExecutionStatus(dict["status"]),
+            status=ExecutionStatus[dict["status"]],
+            start_time=(
+                datetime.datetime.fromisoformat(dict["start_time"])
+                if dict["start_time"]
+                else None
+            ),
+            end_time=(
+                datetime.datetime.fromisoformat(dict["end_time"])
+                if dict["end_time"]
+                else None
+            ),
+            exit_code=dict["exit_code"],
+        )
+
 
 @dataclasses.dataclass
 class GraphExecution(Execution):
@@ -684,6 +811,37 @@ class _StorageArtifact(artifact_stores.Artifact):
     def _download_as_bytes(self) -> bytes:
         return self._uri_reader.download_as_bytes()
 
+    def _get_info(self) -> storage_providers.interfaces.DataInfo:
+        return self._uri_reader.get_info()
+
+    def _to_dict(self) -> dict:
+        data_uri_dict = self._uri_reader.uri.to_dict()
+        result = {
+            # TODO: Create a TypeSpec class that represents type_spec and has .to_dict()
+            "type_spec": self._type_spec,
+            "data_uri": data_uri_dict,
+        }
+        data_info = getattr(self, "_data_info", None)
+        if data_info:
+            result["data_info"] = dataclasses.asdict(data_info)
+        return result
+
+    @staticmethod
+    def _from_dict(
+        dict: dict, provider: storage_providers.StorageProvider
+    ) -> "_StorageArtifact":
+        data_uri = storage_providers.DataUri.from_dict(dict["data_uri"])
+        uri_accessor = storage_providers.UriAccessor(uri=data_uri, provider=provider)
+        type_spec = dict["type_spec"]
+        storage_artifact = _StorageArtifact(
+            uri_reader=uri_accessor.get_reader(), type_spec=type_spec
+        )
+        if "data_info" in dict:
+            storage_artifact._data_info = storage_providers.DataInfo(
+                **dict["data_info"]
+            )
+        return storage_artifact
+
 
 class _FutureExecutionOutputArtifact(artifact_stores.Artifact):
     def __init__(
@@ -707,3 +865,12 @@ class _FutureExecutionOutputArtifact(artifact_stores.Artifact):
 
     def _download_as_bytes(self) -> bytes:
         return self._get_artifact()._download_as_bytes()
+
+
+_T = typing.TypeVar("_T")
+
+
+def _assert_type(value: typing.Any, typ: typing.Type[_T]) -> _T:
+    if not isinstance(value, typ):
+        raise TypeError(f"Expected type {typ}, but got {type(value)}: {value}")
+    return value
