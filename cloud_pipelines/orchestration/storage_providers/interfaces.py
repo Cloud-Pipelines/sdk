@@ -5,7 +5,14 @@ import json
 import tempfile
 from typing import Dict, Sequence
 
-__all__ = ["DataUri", "UriReader", "UriWriter", "UriAccessor", "StorageProvider"]
+__all__ = [
+    "DataUri",
+    "DataInfo",
+    "UriReader",
+    "UriWriter",
+    "UriAccessor",
+    "StorageProvider",
+]
 
 
 class DataUri(abc.ABC):
