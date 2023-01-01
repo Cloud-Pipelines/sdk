@@ -22,6 +22,9 @@ class LocalUri(interfaces.DataUri):
         return LocalUri(path=new_path)
 
 
+LocalUri._register_subclass("local")
+
+
 class LocalStorageProvider(interfaces.StorageProvider):
     def make_uri(self, path: str) -> interfaces.UriAccessor:
         return interfaces.UriAccessor(

@@ -3,7 +3,7 @@ import dataclasses
 import hashlib
 import json
 import tempfile
-from typing import Dict, Sequence
+from typing import Dict, Sequence, Type
 
 __all__ = [
     "DataUri",
@@ -16,9 +16,37 @@ __all__ = [
 
 
 class DataUri(abc.ABC):
+    _type_name_to_type_map: Dict[str, Type["DataUri"]] = {}
+    _type_to_type_name_map: Dict[Type["DataUri"], str] = {}
+
     @abc.abstractmethod
     def join_path(self, relative_path: str) -> "DataUri":
         raise NotImplementedError
+
+    @classmethod
+    def _register_subclass(cls, type_name: str):
+        if type_name in DataUri._type_name_to_type_map:
+            raise ValueError(f"Type name {type_name} already exists")
+        DataUri._type_name_to_type_map[type_name] = cls
+        DataUri._type_to_type_name_map[cls] = type_name
+
+    def to_dict(self) -> dict:
+        cls = type(self)
+        type_name = DataUri._type_to_type_name_map[cls]
+        result = {
+            "type": type_name,
+            "properties": self.__dict__,
+        }
+        return result
+
+    @staticmethod
+    def from_dict(dict: dict) -> "DataUri":
+        type_name = dict["type"]
+        properties = dict["properties"]
+        cls = DataUri._type_name_to_type_map.get(type_name)
+        if not cls:
+            raise ValueError(f"DataUri type {type_name} is not registered.")
+        return cls(**properties)
 
 
 @dataclasses.dataclass

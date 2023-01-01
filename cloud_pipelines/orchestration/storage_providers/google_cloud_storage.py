@@ -20,6 +20,9 @@ class GoogleCloudStorageUri(interfaces.DataUri):
         return GoogleCloudStorageUri(uri=new_uri)
 
 
+GoogleCloudStorageUri._register_subclass("google_cloud_storage")
+
+
 class GoogleCloudStorageProvider(interfaces.StorageProvider):
     def __init__(self, client: Optional[storage.Client] = None) -> None:
         self._client = client or storage.Client()
