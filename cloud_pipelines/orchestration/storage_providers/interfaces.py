@@ -40,6 +40,9 @@ class UriReader(_UriAccessorBase):
     def download_as_bytes(self) -> bytes:
         return self._provider.download_bytes(source_uri=self.uri)
 
+    def exists(self) -> bool:
+        return self._provider.exists(uri=self.uri)
+
     def get_info(self) -> DataInfo:
         return self._provider.get_info(uri=self.uri)
 
@@ -106,6 +109,10 @@ class StorageProvider(abc.ABC):
     # @abc.abstractmethod
     # def move(self, source_uri: DataUri, destination_uri: DataUri):
     #     raise NotImplementedError
+
+    @abc.abstractmethod
+    def exists(self, uri: DataUri) -> bool:
+        raise NotImplementedError
 
     @abc.abstractmethod
     def get_info(self, uri: DataUri) -> DataInfo:

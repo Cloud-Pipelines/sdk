@@ -116,6 +116,13 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
         _LOGGER.debug(f"Downloading data from {source_uri_str}")
         return source_blob.download_as_bytes()
 
+    def exists(self, uri: GoogleCloudStorageUri) -> bool:
+        blob_uri = uri.uri.rstrip("/")
+        file_blob = storage.Blob.from_string(uri=blob_uri, client=self._client)
+        # The "directory objects" are expected to exist for directories
+        dir_blob = storage.Blob.from_string(uri=blob_uri + "/", client=self._client)
+        return file_blob.exists() or dir_blob.exists()
+
     def get_info(self, uri: GoogleCloudStorageUri) -> interfaces.DataInfo:
         return self._get_info_from_uri(uri.uri)
 

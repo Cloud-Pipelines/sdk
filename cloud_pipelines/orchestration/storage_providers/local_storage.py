@@ -62,6 +62,9 @@ class LocalStorageProvider(interfaces.StorageProvider):
             )
         return source_path.read_bytes()
 
+    def exists(self, uri: LocalUri) -> bool:
+        return pathlib.Path(uri.path).exists()
+
     def get_info(self, uri: LocalUri) -> interfaces.DataInfo:
         return self._get_info_from_path(uri.path)
 
