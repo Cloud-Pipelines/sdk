@@ -2,6 +2,7 @@ from concurrent import futures
 import dataclasses
 import datetime
 import enum
+import hashlib
 import logging
 import tempfile
 import os
@@ -16,6 +17,7 @@ from ..components import structures
 from . import artifact_stores
 from . import storage_providers
 from . import launchers
+from .storage_providers import local_storage
 
 from ..components import _serialization
 
@@ -31,6 +33,8 @@ _TASK_ID_STACK_LOG_ANNOTATION_KEY = "task_id_stack"
 
 
 _ARTIFACT_PATH_LAST_PART = "data"
+
+_ARTIFACT_DATA_HASH = "md5"
 
 
 def _default_log_printer(log_entry: launchers.ProcessLogEntry):
@@ -69,8 +73,22 @@ class Runner:
     def _create_artifact_from_local_data(
         self, path: str, type_spec: Optional[_structures.TypeSpecType]
     ) -> "_StorageArtifact":
-        uri_accessor = self._generate_artifact_data_uri()
-        uri_accessor.get_writer().upload_from_path(path=path)
+        data_info = local_storage._get_data_info_from_path(path=path)
+        data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
+        data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
+        uri_accessor = self._artifacts_root.make_subpath(
+            relative_path=data_key
+        ).make_subpath(relative_path="data")
+        # TODO: Detect the existence by querying the artifact DB, not the data storage.
+        if not uri_accessor.get_reader().exists():
+            # TODO: Make uploading reliable. Upload to temporary location then rename.
+            uri_accessor.get_writer().upload_from_path(path=path)
+        else:
+            # Returning the artifact object that points to existing data
+            # We expect the DB to not be in corrupted state.
+            # We expect that the existing data with same hash is the same as the new data
+            pass
+
         artifact = _StorageArtifact(
             uri_reader=uri_accessor.get_reader(), type_spec=type_spec
         )
