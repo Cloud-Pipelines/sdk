@@ -744,8 +744,8 @@ class ContainerExecution(Execution):
         result = {
             # Execution
             "task_spec": self.task_spec.to_dict(),
-            "input_arguments": input_arguments_struct,
-            "outputs": outputs_struct,
+            "input_artifacts": input_arguments_struct,
+            "output_artifacts": outputs_struct,
             # ContainerExecution
             "status": self.status.name,
             "start_time": self.start_time.isoformat(sep=" ")
@@ -782,13 +782,13 @@ class ContainerExecution(Execution):
                 input_name: _StorageArtifact._from_dict(
                     dict=artifact_struct, provider=storage_provider
                 )
-                for input_name, artifact_struct in dict["input_arguments"].items()
+                for input_name, artifact_struct in dict["input_artifacts"].items()
             },
             outputs={
                 output_name: _StorageArtifact._from_dict(
                     dict=artifact_struct, provider=storage_provider
                 )
-                for output_name, artifact_struct in dict["outputs"].items()
+                for output_name, artifact_struct in dict["output_artifacts"].items()
             },
             # status=ExecutionStatus(dict["status"]),
             status=ExecutionStatus[dict["status"]],
