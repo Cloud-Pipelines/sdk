@@ -65,7 +65,7 @@ class Runner:
         self._artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
         self._db_dir = root_uri.make_subpath(relative_path="db")
         self._executions_table_dir = self._db_dir.make_subpath(
-            relative_path="executions"
+            relative_path="container_executions"
         )
         self._cached_execution_ids_table_dir = self._db_dir.make_subpath(
             relative_path="cached_execution_ids"
