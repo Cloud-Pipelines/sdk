@@ -532,21 +532,22 @@ class Runner:
                     log_message(
                         message=f"Container task completed with status: {execution.status.name}"
                     )
-                    # Storing the successful execution in the db
+                    # Storing the execution in the db
+                    execution_struct = execution._to_dict()
+                    execution_string = json.dumps(execution_struct, indent=2)
+                    # Verifying that the serialized execution can be loaded again
+                    reloaded_execution_struct = json.loads(execution_string)
+                    reloaded_execution = ContainerExecution._from_dict(
+                        reloaded_execution_struct,
+                        storage_provider=self._root_uri._provider,
+                    )
+                    execution.__dict__.update(reloaded_execution.__dict__)
+                    # Storing the execution itself
+                    execution_uri.get_writer().upload_from_bytes(
+                        execution_string.encode("utf-8")
+                    )
+                    # Storing successful execution in the execution cache
                     if execution.status == ExecutionStatus.Succeeded:
-                        execution_struct = execution._to_dict()
-                        execution_string = json.dumps(execution_struct, indent=2)
-                        # Verifying that the serialized execution can be loaded again
-                        reloaded_execution_struct = json.loads(execution_string)
-                        reloaded_execution = ContainerExecution._from_dict(
-                            reloaded_execution_struct,
-                            storage_provider=self._root_uri._provider,
-                        )
-                        execution.__dict__.update(reloaded_execution.__dict__)
-                        # Storing the execution itself
-                        execution_uri.get_writer().upload_from_bytes(
-                            execution_string.encode("utf-8")
-                        )
                         # Storing the reference to the execution in the execution cache.
                         # But only if nothing is stored there yet.
                         if not oldest_cached_execution_id_uri.get_reader().exists():
