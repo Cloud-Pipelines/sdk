@@ -67,6 +67,9 @@ class Runner:
         self._executions_table_dir = self._db_dir.make_subpath(
             relative_path="executions"
         )
+        self._cached_execution_ids_table_dir = self._db_dir.make_subpath(
+            relative_path="cached_execution_ids"
+        )
 
     def _generate_artifact_data_uri(
         self,
@@ -458,17 +461,25 @@ class Runner:
                     execution_cache_key = hashlib.sha256(
                         execution_cache_key_struct_string.encode("utf-8")
                     ).hexdigest()
-                    # TODO: Choose latest sub-folder when loading
-                    # TODO: Store executions with UUIDs and only reference them from the execution cache.
-                    cached_execution_uri_accessor = (
-                        self._executions_table_dir.make_subpath(
+                    cached_execution_dir_uri = (
+                        self._cached_execution_ids_table_dir.make_subpath(
                             "sha256=" + execution_cache_key
-                        ).make_subpath("execution.json")
+                        )
                     )
-                    if cached_execution_uri_accessor.get_reader().exists():
-                        log_message(message="Reused the execution from cache.")
+                    # Trying to use the oldest execution.
+                    # This execution is "canonical" for the execution_cache_key and has the most cached downstream executions.
+                    oldest_cached_execution_id_uri = (
+                        cached_execution_dir_uri.make_subpath("oldest")
+                    )
+                    if oldest_cached_execution_id_uri.get_reader().exists():
+                        oldest_cached_execution_id = (
+                            oldest_cached_execution_id_uri.get_reader().download_as_bytes()
+                        ).decode("utf-8")
+                        cached_execution_uri = self._executions_table_dir.make_subpath(
+                            oldest_cached_execution_id
+                        )
                         cached_execution_data = (
-                            cached_execution_uri_accessor.get_reader().download_as_bytes()
+                            cached_execution_uri.get_reader().download_as_bytes()
                         )
                         cached_execution_struct = json.loads(cached_execution_data)
                         cached_execution = ContainerExecution._from_dict(
@@ -477,7 +488,17 @@ class Runner:
                         )
                         execution.__dict__ = cached_execution.__dict__
                         # TODO: Add information to the ExecutionNode to indicate that the execution was reused from cache
+                        log_message(message="Reused the execution from cache.")
                         return None  # Cached
+
+                    execution_id = (
+                        datetime.datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S_%f")
+                        + "_"
+                        + uuid.uuid4().hex
+                    )
+                    execution_uri = self._executions_table_dir.make_subpath(
+                        execution_id
+                    )
 
                     execution.status = ExecutionStatus.Starting
                     log_message(message="Starting container task.")
@@ -511,21 +532,27 @@ class Runner:
                     log_message(
                         message=f"Container task completed with status: {execution.status.name}"
                     )
-                    # Storing the successful execution in cache
+                    # Storing the successful execution in the db
                     if execution.status == ExecutionStatus.Succeeded:
                         execution_struct = execution._to_dict()
                         execution_string = json.dumps(execution_struct, indent=2)
-                        reloaded_execution_struct = json.loads(execution_string)
                         # Verifying that the serialized execution can be loaded again
+                        reloaded_execution_struct = json.loads(execution_string)
                         reloaded_execution = ContainerExecution._from_dict(
                             reloaded_execution_struct,
                             storage_provider=self._root_uri._provider,
                         )
                         execution.__dict__.update(reloaded_execution.__dict__)
-                        # TODO: Store in datetime.datetime.utcnow().timestamp subdir
-                        cached_execution_uri_accessor.get_writer().upload_from_bytes(
+                        # Storing the execution itself
+                        execution_uri.get_writer().upload_from_bytes(
                             execution_string.encode("utf-8")
                         )
+                        # Storing the reference to the execution in the execution cache.
+                        # But only if nothing is stored there yet.
+                        if not oldest_cached_execution_id_uri.get_reader().exists():
+                            oldest_cached_execution_id_uri.get_writer().upload_from_bytes(
+                                execution_id.encode("utf-8")
+                            )
                     if execution.status == ExecutionStatus.Failed:
                         raise ExecutionFailedError(execution=execution)
                     return container_execution_result
