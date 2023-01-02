@@ -62,7 +62,7 @@ class Runner:
         self._root_uri = root_uri
         self._on_log_entry_callback = on_log_entry_callback
         self._futures_executor = futures.ThreadPoolExecutor()
-        self._artifacts_root = root_uri.make_subpath(relative_path="artifacts")
+        self._artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
         self._db_dir = root_uri.make_subpath(relative_path="db")
         self._executions_table_dir = self._db_dir.make_subpath(
             relative_path="executions"
@@ -74,7 +74,7 @@ class Runner:
     def _generate_artifact_data_uri(
         self,
     ) -> storage_providers.UriAccessor:
-        return self._artifacts_root.make_subpath(
+        return self._artifact_data_dir.make_subpath(
             relative_path="uuid=" + uuid.uuid4().hex
         ).make_subpath(relative_path="data")
 
@@ -84,7 +84,7 @@ class Runner:
         data_info = local_storage._get_data_info_from_path(path=path)
         data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
         data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
-        uri_accessor = self._artifacts_root.make_subpath(
+        uri_accessor = self._artifact_data_dir.make_subpath(
             relative_path=data_key
         ).make_subpath(relative_path="data")
         # TODO: Detect the existence by querying the artifact DB, not the data storage.
