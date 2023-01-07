@@ -74,6 +74,9 @@ class Runner:
             cached_execution_ids_table_dir=self._cached_execution_ids_table_dir,
             executions_table_dir=self._executions_table_dir,
         )
+        self._artifact_data_info_table_dir = self._db_dir.make_subpath(
+            relative_path="artifact_data_info"
+        )
 
     def _generate_artifact_data_uri(
         self,
@@ -119,6 +122,45 @@ class Runner:
             return self._create_artifact_from_local_data(
                 path=data_path, type_spec=type_spec
             )
+
+    def _deduplicate_storage_artifact(
+        self, artifact: "_StorageArtifact"
+    ) -> "_StorageArtifact":
+        data_info = (
+            getattr(artifact, "_data_info", None) or artifact._uri_reader.get_info()
+        )
+        data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
+        data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
+        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
+            relative_path=data_key
+        )
+        if artifact_data_info_uri.get_reader().exists():
+            # Returning the artifact object that points to existing data
+            # We expect the DB to not be in corrupted state.
+            # We expect that the existing data with same hash is the same as the new data
+
+            artifact_data_info_struct = json.loads(
+                artifact_data_info_uri.get_reader().download_as_bytes()
+            )
+            artifact_data_info_struct["type_spec"] = artifact._type_spec
+            existing_data_artifact = _StorageArtifact._from_dict(
+                artifact_data_info_struct, provider=self._root_uri._provider
+            )
+            # TODO: ! Delete the new artifact data
+            assert existing_data_artifact._data_info == data_info
+            return existing_data_artifact
+        else:
+            # TODO: Rename the artifact to directory based on the data hash.
+            artifact._data_info = data_info
+            artifact_data_info_struct = artifact._to_dict()
+            # TODO: Create ArtifactData class that holds the artifact URI and info, but not type or execution.
+            del artifact_data_info_struct["type_spec"]
+
+            artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
+            artifact_data_info_uri.get_writer().upload_from_bytes(
+                artifact_data_info_str.encode("utf-8")
+            )
+            return artifact
 
     def _run_graph_task(
         self,
@@ -536,6 +578,9 @@ class Runner:
                                 type_spec=output_specs[output_name].type,
                             )
                             output_artifact._data_info = artifact_info
+                            output_artifact = self._deduplicate_storage_artifact(
+                                artifact=output_artifact
+                            )
                             output_artifacts[output_name] = output_artifact
                     else:
                         execution.status = ExecutionStatus.Failed

@@ -139,7 +139,7 @@ def fail():
 
 
 @components.create_component_from_func
-def generate_random_number() -> int:
+def generate_random_number(dummy: int = None) -> int:
     import random
 
     return random.randint(0, 1000000)
@@ -187,6 +187,13 @@ def _produce_and_consume_component(
         input_list,
         input_dict,
     )
+
+
+@components.create_component_from_func
+def produce_two_equal_strings(
+    string: str = "string",
+) -> typing.NamedTuple("Outputs", [("string1", str), ("string2", str),]):
+    return (string, string)
 
 
 class LaunchersTestCase(unittest.TestCase):
@@ -605,6 +612,58 @@ class LaunchersTestCase(unittest.TestCase):
                     result_time_10,
                     "The 'P5D==time_10' execution should have been reused.",
                 )
+
+    def test_output_artifacts_are_deduplicated(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                execution: runners.ContainerExecution = produce_two_equal_strings()
+                execution.wait_for_completion()
+                artifact_1: runners._StorageArtifact = execution.outputs["string1"]
+                artifact_2: runners._StorageArtifact = execution.outputs["string2"]
+                self.assertEqual(
+                    artifact_1._uri_reader.uri.to_dict(),
+                    artifact_2._uri_reader.uri.to_dict(),
+                )
+
+    def test_content_based_cache_reuse(self):
+        """Tests that downstream execution can be reused from cache if the input artifact content is the same even if the upstream execution is not reused from cache.
+
+        For example, if we fix a typo in the component code comments, that component will be re-executed.
+        But if the outputs are the same the downstream components should still be reused from cache.
+        """
+
+        @components.create_component_from_func
+        def make_seed_1() -> int:
+            # Version 1 of the component
+            return 4
+
+        @components.create_component_from_func
+        def make_seed_2() -> int:
+            # Version 2 of the component (outputs same data)
+            return 2 * 2
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                seed1_art = make_seed_1().outputs["Output"]
+                result_1 = (
+                    generate_random_number(dummy=seed1_art)
+                    .outputs["Output"]
+                    .materialize()
+                )
+
+                seed2_art = make_seed_2().outputs["Output"]
+                result_2 = (
+                    generate_random_number(dummy=seed2_art)
+                    .outputs["Output"]
+                    .materialize()
+                )
+                self.assertEqual(result_1, result_2)
 
 
 if __name__ == "__main__":
