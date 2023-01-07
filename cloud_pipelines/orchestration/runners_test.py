@@ -1,10 +1,13 @@
+import datetime
 import os
 import tempfile
 import typing
 import unittest
+from unittest import mock
 
 # from ..components import create_component_from_func, create_graph_component_from_pipeline_func
 from cloud_pipelines import components
+from cloud_pipelines.components import structures
 
 
 from cloud_pipelines.orchestration import runners
@@ -12,6 +15,7 @@ from cloud_pipelines.orchestration import runners
 # from .launchers.local_environment_launcher import LocalEnvironmentContainerLauncher
 # from .launchers.local_docker_launcher import DockerContainerLauncher
 # from .launchers.local_kubernetes_launcher import LocalKubernetesContainerLauncher
+from cloud_pipelines.orchestration.launchers import local_environment_launcher
 from cloud_pipelines.orchestration.launchers.local_environment_launcher import (
     LocalEnvironmentLauncher,
 )
@@ -403,6 +407,204 @@ class LaunchersTestCase(unittest.TestCase):
                 result_art_1.materialize()
                 result_art_2 = generate_random_number().outputs["Output"]
                 self.assertEqual(result_art_1.materialize(), result_art_2.materialize())
+
+    def test_reusing_execution_from_cache_with_max_cache_staleness(self):
+        # Testing the cache reuse rules.
+        # The cache reuse algorithm is pretty simple
+        # if max_cache_staleness:
+        #     Try reuse the execution with same max_cache_staleness (if viable) out of possibly many viable executions. This is a non-trivial part of the design.
+        #     Else try reuse the "latest" execution (if viable) and set max_cache_staleness pointer to this execution
+        #     Else create new execution and set max_cache_staleness pointer to this execution
+        # if no max_cache_staleness:
+        #     Try reuse the "oldest" execution (if exists)
+        #     Else create new execution
+        # If new execution was created and succeeded:
+        #     If the "oldest" pointer is unset, then set it to the new execution
+        #     Set the "latest" pointer to the new execution
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            runner = runners.Runner(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            )
+            time_0 = datetime.datetime.utcnow()
+            time_10 = time_0 + datetime.timedelta(days=10)
+            time_12 = time_0 + datetime.timedelta(days=12)
+            datetime_mock = mock.MagicMock(wraps=datetime)
+            # We need to patch both runners and local_environment_launcher (which calculates end_time)
+            # with mock.patch.object(runners, "datetime", wraps=datetime) as datetime_mock:
+            with mock.patch.object(
+                runners, attribute="datetime", new=datetime_mock
+            ), mock.patch.object(
+                local_environment_launcher, attribute="datetime", new=datetime_mock
+            ):
+                # Running the task that should become the oldest execution
+                datetime_mock.datetime.utcnow.return_value = time_0
+                result_time_0 = (
+                    runner.run_component(generate_random_number)
+                    .outputs["Output"]
+                    .materialize()
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_0
+                # Testing that the execution (oldest) is reused when no max_cache_staleness is specified
+                datetime_mock.datetime.utcnow.return_value = time_10
+                result_1 = (
+                    runner.run_component(generate_random_number)
+                    .outputs["Output"]
+                    .materialize()
+                )
+                self.assertEqual(
+                    result_1,
+                    result_time_0,
+                    "Execution should have been reused from the oldest execution due to no max_cache_staleness.",
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_0
+                # Testing that the execution (latest=oldest) is reused when it's inside the range of max_cache_staleness
+                datetime_mock.datetime.utcnow.return_value = time_10
+                task_2 = generate_random_number()
+                task_2.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P30D"
+                    )
+                )
+                result_2 = runner.run_task(task_2).outputs["Output"].materialize()
+                self.assertEqual(
+                    result_2,
+                    result_time_0,
+                    "Execution should have been reused as it's inside the range of max_cache_staleness.",
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_0
+                # P30D: time_0
+                # At this point there should only be one execution in the cache.
+                # Testing that the executions are not reused when they are outside of the range of max_cache_staleness
+                datetime_mock.datetime.utcnow.return_value = time_10
+                task3 = generate_random_number()
+                task3.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P5D"
+                    )
+                )
+                result_time_10 = runner.run_task(task3).outputs["Output"].materialize()
+                self.assertNotEqual(
+                    result_time_10,
+                    result_time_0,
+                    "Execution should not have been reused as it's outside of the range of max_cache_staleness.",
+                )
+                # At this point there should be two executions in the cache.
+                # State:
+                # oldest: time_0
+                # latest: time_10
+                # P30D: time_0
+                # P5D: time_10
+                # Testing that the first cached execution candidate is the execution that had the same with max_cache_staleness (if within the time range).
+                # In this case P30D is set to the "time_0" execution, so this is what should be reused.
+                datetime_mock.datetime.utcnow.return_value = time_12
+                task4 = generate_random_number()
+                task4.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P30D"
+                    )
+                )
+                result_4 = runner.run_task(task4).outputs["Output"].materialize()
+                self.assertEqual(
+                    result_4,
+                    result_time_0,
+                    "The 'P30D==time_0' execution should have been reused.",
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_10
+                # P30D: time_0
+                # P5D: time_10
+                # Testing that the first cached execution candidate is the execution that had the same with max_cache_staleness (if within the time range).
+                # In this case P5D is set to the "time_10" execution, so this is what should be reused.
+                datetime_mock.datetime.utcnow.return_value = time_12
+                task5 = generate_random_number()
+                task5.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P5D"
+                    )
+                )
+                result_5 = runner.run_task(task5).outputs["Output"].materialize()
+                self.assertEqual(
+                    result_5,
+                    result_time_10,
+                    "The 'P5D==time_10' execution should have been reused.",
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_10
+                # P30D: time_0
+                # P5D: time_10
+                # Testing that the when there is no viable (within the time range) execution with same with max_cache_staleness, the latest execution is used (if viable).
+                # In this case, the latest execution is viable.
+                datetime_mock.datetime.utcnow.return_value = time_12
+                task6 = generate_random_number()
+                task6.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P20D"
+                    )
+                )
+                result_6 = runner.run_task(task6).outputs["Output"].materialize()
+                self.assertEqual(
+                    result_6,
+                    result_time_10,
+                    "The 'latest==time_10' execution should have been reused.",
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_10
+                # P30D: time_0
+                # P5D: time_10
+                # P20D: time_10
+                # Testing that the when there is no viable (within the time range) execution with same with max_cache_staleness, the latest execution is used (if viable).
+                # In this case, the latest execution is not viable, so a new execution is created.
+                datetime_mock.datetime.utcnow.return_value = time_12
+                task7 = generate_random_number()
+                task7.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P1D"
+                    )
+                )
+                result_time_12 = runner.run_task(task7).outputs["Output"].materialize()
+                self.assertNotEqual(
+                    result_time_12,
+                    result_time_0,
+                    "The 'oldest==time_0' execution should not have been reused since it's out of time range.",
+                )
+                self.assertNotEqual(
+                    result_time_12,
+                    result_time_10,
+                    "The 'latest==time_10' execution should not have been reused since it's out of time range.",
+                )
+                # State:
+                # oldest: time_0
+                # latest: time_12
+                # P30D: time_0
+                # P5D: time_10
+                # P20D: time_10
+                # P1D: time_12
+                # Again, Testing that the first cached execution candidate is the execution that had the same with max_cache_staleness (if within the time range).
+                # In this case P20D is set to the "time_10" execution, so this is what should be reused (despite time_0 and time_12 being in range).
+                datetime_mock.datetime.utcnow.return_value = time_12
+                task8 = generate_random_number()
+                task8.execution_options = structures.ExecutionOptionsSpec(
+                    caching_strategy=structures.CachingStrategySpec(
+                        max_cache_staleness="P20D"
+                    )
+                )
+                result_8 = runner.run_task(task8).outputs["Output"].materialize()
+                self.assertEqual(
+                    result_8,
+                    result_time_10,
+                    "The 'P5D==time_10' execution should have been reused.",
+                )
 
 
 if __name__ == "__main__":
