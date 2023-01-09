@@ -140,7 +140,7 @@ class Runner:
             # We expect that the existing data with same hash is the same as the new data
 
             artifact_data_info_struct = json.loads(
-                artifact_data_info_uri.get_reader().download_as_bytes()
+                artifact_data_info_uri.get_reader().download_as_text()
             )
             artifact_data_info_struct["type_spec"] = artifact._type_spec
             existing_data_artifact = _StorageArtifact._from_dict(
@@ -157,9 +157,7 @@ class Runner:
             del artifact_data_info_struct["type_spec"]
 
             artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
-            artifact_data_info_uri.get_writer().upload_from_bytes(
-                artifact_data_info_str.encode("utf-8")
-            )
+            artifact_data_info_uri.get_writer().upload_from_text(artifact_data_info_str)
             return artifact
 
     def _run_graph_task(
@@ -455,9 +453,7 @@ class Runner:
                 # )
                 # execution.__dict__.update(reloaded_execution.__dict__)
                 # Storing the execution itself
-                execution_uri.get_writer().upload_from_bytes(
-                    execution_string.encode("utf-8")
-                )
+                execution_uri.get_writer().upload_from_text(execution_string)
 
             def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
                 if task_id_stack:
@@ -972,11 +968,9 @@ class _ExecutionCacheDb:
         ).make_subpath(tag)
         if not execution_id_uri.get_reader().exists():
             return None
-        execution_id = (execution_id_uri.get_reader().download_as_bytes()).decode(
-            "utf-8"
-        )
+        execution_id = execution_id_uri.get_reader().download_as_text()
         execution_uri = self._executions_table_dir.make_subpath(execution_id)
-        execution_data = execution_uri.get_reader().download_as_bytes()
+        execution_data = execution_uri.get_reader().download_as_text()
         execution_struct = json.loads(execution_data)
         loaded_execution = ContainerExecution._from_dict(
             execution_struct,
@@ -1090,9 +1084,7 @@ class _ExecutionCacheDb:
             execution_cache_key
         ).make_subpath(tag)
         if overwrite or not cached_execution_id_uri.get_reader().exists():
-            cached_execution_id_uri.get_writer().upload_from_bytes(
-                execution_id.encode("utf-8")
-            )
+            cached_execution_id_uri.get_writer().upload_from_text(execution_id)
 
     def put_execution_id_in_cache(
         self,

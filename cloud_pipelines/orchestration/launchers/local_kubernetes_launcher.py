@@ -108,7 +108,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
                 value: storage_providers.UriReader, type_name: str
             ) -> str:
                 assert isinstance(value, storage_providers.UriReader)
-                return value.download_as_bytes().decode("utf-8")
+                return value.download_as_text()
 
             resolved_cmd = _resolve_command_line_and_paths(
                 component_spec=component_spec,

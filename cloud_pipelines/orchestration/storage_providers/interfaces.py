@@ -75,6 +75,9 @@ class UriReader(_UriAccessorBase):
     def download_as_bytes(self) -> bytes:
         return self._provider.download_bytes(source_uri=self.uri)
 
+    def download_as_text(self) -> str:
+        return self._provider.download_bytes(source_uri=self.uri).decode("utf-8")
+
     def exists(self) -> bool:
         return self._provider.exists(uri=self.uri)
 
@@ -88,6 +91,9 @@ class UriWriter(_UriAccessorBase):
 
     def upload_from_bytes(self, data: bytes) -> None:
         self._provider.upload_bytes(data=data, destination_uri=self.uri)
+
+    def upload_from_text(self, data: str) -> None:
+        self._provider.upload_bytes(data=data.encode("utf-8"), destination_uri=self.uri)
 
 
 # class UriAccessor(UriReader, UriWriter):
