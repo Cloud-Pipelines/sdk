@@ -135,6 +135,7 @@ def consume_as_value(data):
 def fail():
     import sys
 
+    print("Failing...")
     sys.exit(42)
 
 
@@ -196,6 +197,14 @@ def produce_two_equal_strings(
     return (string, string)
 
 
+@components.create_component_from_func
+def write_text_to_stdout_and_stderr(text="Hello world"):
+    import sys
+
+    print("stdout:" + text, file=sys.stdout)
+    print("stderr:" + text, file=sys.stderr)
+
+
 class LaunchersTestCase(unittest.TestCase):
     def test_local_environment_launcher(self):
         nested_pipeline_op = _build_nested_graph_component()
@@ -211,6 +220,13 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution.wait_for_completion()
 
+            # Test logs
+            execution2 = runner.run_component(write_text_to_stdout_and_stderr)
+            execution2.wait_for_completion()
+            log_text = execution2._log_artifact._download_as_bytes().decode("utf-8")
+            assert "stdout:Hello world" in log_text
+            assert "stderr:Hello world" in log_text
+
     def test_local_docker_launcher(self):
         component = _build_data_passing_graph_component()
 
@@ -225,6 +241,13 @@ class LaunchersTestCase(unittest.TestCase):
             )
             execution.wait_for_completion()
 
+            # Test logs
+            execution2 = runner.run_component(write_text_to_stdout_and_stderr)
+            execution2.wait_for_completion()
+            log_text = execution2._log_artifact._download_as_bytes().decode("utf-8")
+            assert "stdout:Hello world" in log_text
+            assert "stderr:Hello world" in log_text
+
     def test_local_kubernetes_launcher(self):
         component = _build_data_passing_graph_component()
 
@@ -238,6 +261,13 @@ class LaunchersTestCase(unittest.TestCase):
                 arguments=dict(graph_input_1="graph_input_1"),
             )
             execution.wait_for_completion()
+
+            # Test logs
+            execution2 = runner.run_component(write_text_to_stdout_and_stderr)
+            execution2.wait_for_completion()
+            log_text = execution2._log_artifact._download_as_bytes().decode("utf-8")
+            assert "stdout:Hello world" in log_text
+            assert "stderr:Hello world" in log_text
 
     @unittest.skipIf(
         condition=_GOOGLE_CLOUD_STORAGE_ROOT_URI is None,
@@ -664,6 +694,86 @@ class LaunchersTestCase(unittest.TestCase):
                     .materialize()
                 )
                 self.assertEqual(result_1, result_2)
+
+    def test_container_execution_logging_when_running(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                with self.assertLogs(runners._default_log_printer_logger) as logs:
+                    execution: runners.ContainerExecution = (
+                        write_text_to_stdout_and_stderr()
+                    )
+                    execution.wait_for_completion()
+                assert any("stdout:Hello world" in line for line in logs.output)
+                assert any("stderr:Hello world" in line for line in logs.output)
+
+    def test_container_execution_logging_when_reusing_from_cache(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                # Populating the cache
+                write_text_to_stdout_and_stderr().wait_for_completion()
+
+                with self.assertLogs(runners._default_log_printer_logger) as logs:
+                    execution: runners.ContainerExecution = (
+                        write_text_to_stdout_and_stderr()
+                    )
+                    execution.wait_for_completion()
+                assert any("Reused execution log:" in line for line in logs.output)
+                assert any("stdout:Hello world" in line for line in logs.output)
+                assert any("stderr:Hello world" in line for line in logs.output)
+
+    def test_container_execution_log_artifact_when_running(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                execution: runners.ContainerExecution = (
+                    write_text_to_stdout_and_stderr()
+                )
+                execution.wait_for_completion()
+                log_text = execution._log_artifact._download_as_bytes().decode("utf-8")
+                assert "stdout:Hello world" in log_text
+                assert "stderr:Hello world" in log_text
+
+    def test_container_execution_log_artifact_when_failing(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+                # Preventing the context from raising ExecutionFailedError
+                # Adding an outer with `self.assertRaises(runners.ExecutionFailedError)`
+                # does not work since for some reason it catches all errors.
+                wait_for_completion_on_exit=False,
+            ):
+                execution: runners.ContainerExecution = fail()
+                with self.assertRaises(runners.ExecutionFailedError):
+                    execution.wait_for_completion()
+                log_text = execution._log_artifact._download_as_bytes().decode("utf-8")
+                self.assertIn("Failing...", log_text)
+                assert "Failing..." in log_text
+
+    def test_container_execution_log_artifact_when_reusing_from_cache(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                # Populating the cache
+                write_text_to_stdout_and_stderr().wait_for_completion()
+
+                execution: runners.ContainerExecution = (
+                    write_text_to_stdout_and_stderr()
+                )
+                execution.wait_for_completion()
+                log_text = execution._log_artifact._download_as_bytes().decode("utf-8")
+                assert "stdout:Hello world" in log_text
+                assert "stderr:Hello world" in log_text
 
 
 if __name__ == "__main__":

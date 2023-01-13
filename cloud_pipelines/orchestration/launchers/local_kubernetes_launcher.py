@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import os
 from pathlib import Path, PurePosixPath
@@ -62,6 +63,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
+        log_uri_writer: storage_providers.UriWriter,
     ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -235,6 +237,9 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
             pod_name = pod_res.metadata.name
             _logger.info(f"Created pod {pod_name}")
 
+            def upload_logs(text_log: str):
+                log_uri_writer.upload_from_text(text_log)
+
             def upload_all_artifacts():
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
@@ -249,6 +254,7 @@ class LocalKubernetesContainerLauncher(interfaces.ContainerTaskLauncher):
                 pod_name=pod_name,
                 namespace=self._namespace,
                 upload_all_artifacts=upload_all_artifacts,
+                upload_logs=upload_logs,
                 clean_up=clean_up,
                 start_time=start_time,
             )
@@ -265,6 +271,7 @@ class _LaunchedKubernetesPod(interfaces.LaunchedContainer):
         pod_name: str,
         namespace: str,
         upload_all_artifacts: Callable[[], None],
+        upload_logs: Callable[[str], None],
         clean_up: Callable[[], None],
         start_time: datetime.datetime,
     ):
@@ -272,6 +279,7 @@ class _LaunchedKubernetesPod(interfaces.LaunchedContainer):
         self._pod_name = pod_name
         self._namespace = namespace
         self._upload_all_artifacts = upload_all_artifacts
+        self._upload_logs = upload_logs
         self._clean_up = clean_up
         self._start_time = start_time or datetime.datetime.utcnow()
         self._execution_result: Optional[interfaces.ContainerExecutionResult] = None
@@ -327,6 +335,7 @@ class _LaunchedKubernetesPod(interfaces.LaunchedContainer):
         exit_code = main_container_terminated_state.exit_code
 
         log = interfaces.ProcessLog()
+        text_log_chunks = []
         try:
             for text in k8s_watch.Watch().stream(
                 core_api.read_namespaced_pod_log,
@@ -334,19 +343,24 @@ class _LaunchedKubernetesPod(interfaces.LaunchedContainer):
                 namespace=self._namespace,
             ):
                 assert isinstance(text, str)
+                log_entry_time = datetime.datetime.utcnow()
                 log_entry = interfaces.ProcessLogEntry(
                     message_bytes=text.encode("utf-8"),
-                    time=datetime.datetime.utcnow(),
+                    time=log_entry_time,
                     annotations={_POD_NAME_LOG_ANNOTATION_KEY: self._pod_name},
                 )
                 if on_log_entry_callback:
                     on_log_entry_callback(log_entry)
                 log.add_entry(log_entry)
+                text_log_chunks.append(
+                    log_entry_time.isoformat(sep=" ", timespec="seconds") + "\t" + text
+                )
         except k8s_client.ApiException as e:
             _logger.exception(f"Exception while reading the logs.", exc_info=True)
         log.close()
 
         # Storing the output data
+        self._upload_logs("".join(text_log_chunks))
         succeeded = exit_code == 0
         if succeeded:
             self._upload_all_artifacts()

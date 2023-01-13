@@ -43,6 +43,7 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
+        log_uri_writer: storage_providers.UriWriter,
     ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -140,6 +141,9 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
             )
             _logger.info(f"Started container {container.id}")
 
+            def upload_logs(text_log: str):
+                log_uri_writer.upload_from_text(text_log)
+
             def upload_all_artifacts():
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
@@ -153,6 +157,7 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
             launched_docker_container = _LaunchedDockerContainer(
                 container=container,
                 upload_all_artifacts=upload_all_artifacts,
+                upload_logs=upload_logs,
                 clean_up=clean_up,
                 start_time=start_time,
             )
@@ -167,11 +172,13 @@ class _LaunchedDockerContainer(interfaces.LaunchedContainer):
         self,
         container: Container,
         upload_all_artifacts: Callable[[], None],
+        upload_logs: Callable[[str], None],
         clean_up: Callable[[], None],
         start_time: datetime.datetime,
     ):
         self._container = container
         self._upload_all_artifacts = upload_all_artifacts
+        self._upload_logs = upload_logs
         self._clean_up = clean_up
         self._start_time = start_time or datetime.datetime.utcnow()
         self._execution_result: Optional[interfaces.ContainerExecutionResult] = None
@@ -190,15 +197,23 @@ class _LaunchedDockerContainer(interfaces.LaunchedContainer):
             stdout=True, stderr=True, stream=True, follow=True
         )
         log = interfaces.ProcessLog()
+        text_log_chunks = []
         for log_bytes in log_generator:
+            log_entry_time = datetime.datetime.utcnow()
             log_entry = interfaces.ProcessLogEntry(
                 message_bytes=log_bytes,
-                time=datetime.datetime.utcnow(),
+                time=log_entry_time,
                 annotations={_CONTAINER_ID_LOG_ANNOTATION_KEY: self._container.id},
             )
             if on_log_entry_callback:
                 on_log_entry_callback(log_entry)
             log.add_entry(log_entry)
+            b''.decode()
+            text_log_chunks.append(
+                log_entry_time.isoformat(sep=" ", timespec="seconds")
+                + "\t"
+                + log_bytes.decode("utf-8", errors="replace")
+            )
         log.close()
 
         wait_result = self._container.wait()
@@ -207,6 +222,7 @@ class _LaunchedDockerContainer(interfaces.LaunchedContainer):
         exit_code = wait_result["StatusCode"]
 
         # Storing the output data
+        self._upload_logs("".join(text_log_chunks))
         succeeded = exit_code == 0
         if succeeded:
             self._upload_all_artifacts()

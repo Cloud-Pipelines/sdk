@@ -56,6 +56,7 @@ class GoogleCloudBatchLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
+        log_uri_writer: storage_providers.UriWriter,
     ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -93,6 +94,17 @@ class GoogleCloudBatchLauncher(interfaces.ContainerTaskLauncher):
             container_output_paths_map[name] = container_path
             mount_path_to_gcs_uri[container_dir] = uri_dir
             container_volume_mounts.append(f"{container_dir}:{container_dir}:rw")
+
+        # Logging to GCS URI does not seem to work. See https://issuetracker.google.com/issues/261316003
+        # Workaround: Mount the logs location and write to a local path.
+        log_uri = _assert_type(
+            log_uri_writer.uri, google_cloud_storage.GoogleCloudStorageUri
+        ).uri
+        log_uri_dir, _, log_file_name = log_uri.rpartition("/")
+        log_container_dir = "/tmp/log/"
+        log_container_path = log_container_dir + "/" + log_file_name
+        mount_path_to_gcs_uri[log_container_dir] = log_uri_dir
+        container_volume_mounts.append(f"{log_container_dir}:{log_container_dir}:rw")
 
         # Getting artifact values when needed
         # Design options: We could download/mount all artifacts and optionally read from local files,
@@ -151,9 +163,9 @@ class GoogleCloudBatchLauncher(interfaces.ContainerTaskLauncher):
 
         batch_job.labels = job_labels
         # Logs do not seem to work. See https://issuetracker.google.com/issues/261316003
-        # A possible solution is to mount the logs location and write to a local path.
-        # batch_job.logs_policy.destination = batch_v1.LogsPolicy.Destination.PATH
-        # batch_job.logs_policy.logs_path = logs_uri
+        # Workaround: Mount the logs location and write to a local path.
+        batch_job.logs_policy.destination = batch_v1.LogsPolicy.Destination.PATH
+        batch_job.logs_policy.logs_path = log_container_path
 
         def job_to_string(batch_job: batch_v1.Job) -> str:
             job_dict = batch_v1.Job.to_dict(

@@ -26,6 +26,7 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
+        log_uri_writer: storage_providers.UriWriter,
     ) -> interfaces.LaunchedContainer:
         component_ref: structures.ComponentReference = task_spec.component_ref
         component_spec: structures.ComponentSpec = component_ref.spec
@@ -95,6 +96,9 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             )
             _logger.info(f"Started process {process.pid}")
 
+            def upload_logs(text_log: str):
+                log_uri_writer.upload_from_text(text_log)
+
             def upload_all_artifacts():
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
@@ -108,6 +112,7 @@ class LocalEnvironmentLauncher(interfaces.ContainerTaskLauncher):
             launched_process = _LaunchedProcess(
                 process=process,
                 upload_all_artifacts=upload_all_artifacts,
+                upload_logs=upload_logs,
                 clean_up=clean_up,
                 start_time=start_time,
             )
@@ -122,11 +127,13 @@ class _LaunchedProcess(interfaces.LaunchedContainer):
         self,
         process: subprocess.Popen,
         upload_all_artifacts: Callable[[], None],
+        upload_logs: Callable[[str], None],
         clean_up: Callable[[], None],
         start_time: datetime.datetime,
     ):
         self._process = process
         self._upload_all_artifacts = upload_all_artifacts
+        self._upload_logs = upload_logs
         self._clean_up = clean_up
         self._start_time = start_time or datetime.datetime.utcnow()
         self._execution_result: Optional[interfaces.ContainerExecutionResult] = None
@@ -143,15 +150,22 @@ class _LaunchedProcess(interfaces.LaunchedContainer):
             return self._execution_result
 
         log = interfaces.ProcessLog()
+        text_log_chunks = []
         for log_line_bytes in self._process.stdout or []:
+            log_entry_time = datetime.datetime.utcnow()
             log_entry = interfaces.ProcessLogEntry(
                 message_bytes=log_line_bytes,
-                time=datetime.datetime.utcnow(),
+                time=log_entry_time,
                 annotations={_PROCESS_ID_LOG_ANNOTATION_KEY: self._process.pid},
             )
             if on_log_entry_callback:
                 on_log_entry_callback(log_entry)
             log.add_entry(log_entry)
+            text_log_chunks.append(
+                log_entry_time.isoformat(sep=" ", timespec="seconds")
+                + "\t"
+                + log_line_bytes.decode("utf-8", errors="replace")
+            )
         log.close()
         # Wait should be unnecessary since we read all logs to end before getting here.
         # Popen.__exit__ closes process.stdout and calls process.wait
@@ -159,6 +173,8 @@ class _LaunchedProcess(interfaces.LaunchedContainer):
         self._process.__exit__(None, None, None)
         exit_code = self._process.wait()
         end_time = datetime.datetime.utcnow()
+
+        self._upload_logs("".join(text_log_chunks))
 
         # Storing the output data
         succeeded = exit_code == 0
