@@ -63,6 +63,7 @@ class Runner:
         self._on_log_entry_callback = on_log_entry_callback
         self._futures_executor = futures.ThreadPoolExecutor()
         self._artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
+        self._execution_logs_dir = root_uri.make_subpath(relative_path="execution_logs")
         self._db_dir = root_uri.make_subpath(relative_path="db")
         self._executions_table_dir = self._db_dir.make_subpath(
             relative_path="container_executions"
@@ -162,6 +163,14 @@ class Runner:
             artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
             artifact_data_info_uri.get_writer().upload_from_text(artifact_data_info_str)
             return artifact
+
+    def _generate_execution_log_uri(
+        self, execution_id: str
+    ) -> storage_providers.UriAccessor:
+        # Should the log file have name "log.txt" or "data" like all artifacts?
+        return self._execution_logs_dir.make_subpath(
+            relative_path=execution_id
+        ).make_subpath(relative_path="log.txt")
 
     def _run_graph_task(
         self,
@@ -562,10 +571,7 @@ class Runner:
                         return None  # Cached
 
                     # Preparing the log artifact
-                    # TODO: Support JSONL log with timestamps
-                    # log_uri = self._generate_artifact_data_uri().make_subpath("log.txt")
-                    log_uri = self._generate_artifact_data_uri()
-                    # Should log be an artifact, a URI or a separate entity?
+                    log_uri = self._generate_execution_log_uri(execution_id)
                     execution._log_reader = log_uri.get_reader()
 
                     execution.status = ExecutionStatus.Starting
