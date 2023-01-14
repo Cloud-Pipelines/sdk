@@ -105,10 +105,16 @@ class Runner:
             # We expect that the existing data with same hash is the same as the new data
             pass
 
-        artifact = _StorageArtifact(
-            uri_reader=uri_accessor.get_reader(), type_spec=type_spec
+        artifact_data_struct = _ArtifactDataStruct(
+            uri=uri_accessor.uri,
+            info=data_info,
         )
-        artifact._data_info = data_info
+        # TODO: Store the artifact_data_struct in the artifact_data DB table
+        artifact = _StorageArtifact(
+            artifact_data=artifact_data_struct,
+            storage_provider=self._artifact_data_dir._provider,
+            type_spec=type_spec,
+        )
         return artifact
 
     def _create_artifact_from_object(
@@ -127,9 +133,7 @@ class Runner:
     def _deduplicate_storage_artifact(
         self, artifact: "_StorageArtifact"
     ) -> "_StorageArtifact":
-        data_info = (
-            getattr(artifact, "_data_info", None) or artifact._uri_reader.get_info()
-        )
+        data_info = artifact._artifact_data.info
         data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
         data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
         artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
@@ -143,23 +147,17 @@ class Runner:
             artifact_data_info_struct = json.loads(
                 artifact_data_info_uri.get_reader().download_as_text()
             )
-            artifact_struct = {
-                "artifact_data": artifact_data_info_struct,
-                "type_spec": artifact._type_spec,
-            }
-            existing_data_artifact = _StorageArtifact._from_dict(
-                artifact_struct, provider=self._root_uri._provider
+            artifact_data = _ArtifactDataStruct.from_dict(artifact_data_info_struct)
+            existing_data_artifact = _StorageArtifact(
+                artifact_data=artifact_data,
+                storage_provider=self._artifact_data_dir._provider,
+                type_spec=artifact._type_spec,
             )
             # TODO: ! Delete the new artifact data
-            assert existing_data_artifact._data_info == data_info
             return existing_data_artifact
         else:
             # TODO: Rename the artifact to directory based on the data hash.
-            artifact._data_info = data_info
-            artifact_struct = artifact._to_dict()
-            artifact_data_info_struct = artifact_struct["artifact_data"]
-            # TODO: Create ArtifactData class that holds the artifact URI and info, but not type or execution.
-
+            artifact_data_info_struct = artifact._artifact_data.to_dict()
             artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
             artifact_data_info_uri.get_writer().upload_from_text(artifact_data_info_str)
             return artifact
@@ -597,12 +595,14 @@ class Runner:
                         execution.status = ExecutionStatus.Succeeded
 
                         for output_name, output_uri in output_uris.items():
-                            artifact_info = output_uri.get_reader().get_info()
+                            artifact_data_struct = _ArtifactDataStruct.from_uri_reader(
+                                output_uri.get_reader()
+                            )
                             output_artifact = _StorageArtifact(
-                                uri_reader=output_uri.get_reader(),
+                                artifact_data=artifact_data_struct,
+                                storage_provider=output_uri._provider,
                                 type_spec=output_specs[output_name].type,
                             )
-                            output_artifact._data_info = artifact_info
                             output_artifact = self._deduplicate_storage_artifact(
                                 artifact=output_artifact
                             )
@@ -899,14 +899,45 @@ class UpstreamExecutionFailedError(Exception):
         super().__init__(self, execution, upstream_execution)
 
 
+class _ArtifactDataStruct:
+    def __init__(
+        self,
+        uri: storage_providers.DataUri,
+        info: storage_providers.DataInfo,
+    ):
+        self.uri = uri
+        self.info = info
+
+    @staticmethod
+    def from_uri_reader(uri_reader: storage_providers.UriReader):
+        return _ArtifactDataStruct(uri=uri_reader.uri, info=uri_reader.get_info())
+
+    def to_dict(self) -> dict:
+        result = {
+            "uri": self.uri.to_dict(),
+            "info": dataclasses.asdict(self.info),
+        }
+        return result
+
+    @staticmethod
+    def from_dict(dict: dict) -> "_ArtifactDataStruct":
+        uri = storage_providers.DataUri.from_dict(dict["uri"])
+        info = storage_providers.DataInfo(**dict["info"])
+        return _ArtifactDataStruct(uri=uri, info=info)
+
+
 class _StorageArtifact(artifact_stores.Artifact):
     def __init__(
         self,
-        uri_reader: storage_providers.UriReader,
+        artifact_data: _ArtifactDataStruct,
+        storage_provider: storage_providers.StorageProvider,
         type_spec: Optional[_structures.TypeSpecType] = None,
     ):
         super().__init__(type_spec=type_spec)
-        self._uri_reader = uri_reader
+        self._artifact_data = artifact_data
+        self._uri_reader = storage_providers.UriAccessor(
+            uri=artifact_data.uri, provider=storage_provider
+        ).get_reader()
 
     def _download_to_path(self, path: str):
         self._uri_reader.download_to_path(path=path)
@@ -915,16 +946,10 @@ class _StorageArtifact(artifact_stores.Artifact):
         return self._uri_reader.download_as_bytes()
 
     def _get_info(self) -> storage_providers.interfaces.DataInfo:
-        return self._uri_reader.get_info()
+        return self._artifact_data.info
 
     def _to_dict(self) -> dict:
-        data_uri_dict = self._uri_reader.uri.to_dict()
-        artifact_data_dict = {
-            "uri": data_uri_dict,
-        }
-        data_info = getattr(self, "_data_info", None)
-        if data_info:
-            artifact_data_dict["info"] = dataclasses.asdict(data_info)
+        artifact_data_dict = self._artifact_data.to_dict()
         result = {
             # TODO: Create a TypeSpec class that represents type_spec and has .to_dict()
             "type_spec": self._type_spec,
@@ -937,16 +962,11 @@ class _StorageArtifact(artifact_stores.Artifact):
         dict: dict, provider: storage_providers.StorageProvider
     ) -> "_StorageArtifact":
         artifact_data_dict = dict["artifact_data"]
-        data_uri = storage_providers.DataUri.from_dict(artifact_data_dict["uri"])
-        uri_accessor = storage_providers.UriAccessor(uri=data_uri, provider=provider)
+        artifact_data = _ArtifactDataStruct.from_dict(artifact_data_dict)
         type_spec = dict["type_spec"]
         storage_artifact = _StorageArtifact(
-            uri_reader=uri_accessor.get_reader(), type_spec=type_spec
+            artifact_data=artifact_data, storage_provider=provider, type_spec=type_spec
         )
-        if "info" in artifact_data_dict:
-            storage_artifact._data_info = storage_providers.DataInfo(
-                **artifact_data_dict["info"]
-            )
         return storage_artifact
 
 
