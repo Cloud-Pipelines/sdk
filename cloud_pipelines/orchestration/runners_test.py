@@ -223,7 +223,7 @@ class LaunchersTestCase(unittest.TestCase):
             # Test logs
             execution2 = runner.run_component(write_text_to_stdout_and_stderr)
             execution2.wait_for_completion()
-            log_text = execution2._log_artifact._download_as_bytes().decode("utf-8")
+            log_text = execution2._log_reader.download_as_text()
             assert "stdout:Hello world" in log_text
             assert "stderr:Hello world" in log_text
 
@@ -244,7 +244,7 @@ class LaunchersTestCase(unittest.TestCase):
             # Test logs
             execution2 = runner.run_component(write_text_to_stdout_and_stderr)
             execution2.wait_for_completion()
-            log_text = execution2._log_artifact._download_as_bytes().decode("utf-8")
+            log_text = execution2._log_reader.download_as_text()
             assert "stdout:Hello world" in log_text
             assert "stderr:Hello world" in log_text
 
@@ -265,7 +265,7 @@ class LaunchersTestCase(unittest.TestCase):
             # Test logs
             execution2 = runner.run_component(write_text_to_stdout_and_stderr)
             execution2.wait_for_completion()
-            log_text = execution2._log_artifact._download_as_bytes().decode("utf-8")
+            log_text = execution2._log_reader.download_as_text()
             assert "stdout:Hello world" in log_text
             assert "stderr:Hello world" in log_text
 
@@ -737,7 +737,7 @@ class LaunchersTestCase(unittest.TestCase):
                     write_text_to_stdout_and_stderr()
                 )
                 execution.wait_for_completion()
-                log_text = execution._log_artifact._download_as_bytes().decode("utf-8")
+                log_text = execution._log_reader.download_as_text()
                 assert "stdout:Hello world" in log_text
                 assert "stderr:Hello world" in log_text
 
@@ -754,7 +754,7 @@ class LaunchersTestCase(unittest.TestCase):
                 execution: runners.ContainerExecution = fail()
                 with self.assertRaises(runners.ExecutionFailedError):
                     execution.wait_for_completion()
-                log_text = execution._log_artifact._download_as_bytes().decode("utf-8")
+                log_text = execution._log_reader.download_as_text()
                 self.assertIn("Failing...", log_text)
                 assert "Failing..." in log_text
 
@@ -771,7 +771,7 @@ class LaunchersTestCase(unittest.TestCase):
                     write_text_to_stdout_and_stderr()
                 )
                 execution.wait_for_completion()
-                log_text = execution._log_artifact._download_as_bytes().decode("utf-8")
+                log_text = execution._log_reader.download_as_text()
                 assert "stdout:Hello world" in log_text
                 assert "stderr:Hello world" in log_text
 

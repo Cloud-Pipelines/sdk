@@ -546,7 +546,7 @@ class Runner:
                         execution.__dict__ = cached_execution_with_id.execution.__dict__
                         execution._execution_id = cached_execution_with_id.id
                         # TODO: Add information to the ExecutionNode to indicate that the execution was reused from cache
-                        log_bytes = execution._log_artifact._download_as_bytes()
+                        log_bytes = execution._log_reader.download_as_bytes()
                         execution.log = launchers.ProcessLog()
                         execution.log.add_entry(
                             launchers.ProcessLogEntry(message_bytes=log_bytes)
@@ -565,12 +565,8 @@ class Runner:
                     # TODO: Support JSONL log with timestamps
                     # log_uri = self._generate_artifact_data_uri().make_subpath("log.txt")
                     log_uri = self._generate_artifact_data_uri()
-                    # Should log be an artifact or a separate entity?
-                    execution._log_artifact = _StorageArtifact(
-                        uri_reader=log_uri.get_reader(),
-                        # TODO: Support materializing the log artifact
-                        type_spec="Text log",
-                    )
+                    # Should log be an artifact, a URI or a separate entity?
+                    execution._log_reader = log_uri.get_reader()
 
                     execution.status = ExecutionStatus.Starting
                     log_message(message="Starting container task.")
@@ -786,7 +782,7 @@ class ContainerExecution(Execution):
     exit_code: Optional[int] = None
     # TODO: Integrate the `log` with `_log_artifact`
     log: Optional[launchers.ProcessLog] = None
-    _log_artifact: Optional[artifact_stores.Artifact] = None
+    _log_reader: Optional[storage_providers.UriReader] = None
     _waiters: Optional[Sequence[Callable[[], Any]]] = None
     # TODO: Launcher-specific info
 
@@ -817,11 +813,7 @@ class ContainerExecution(Execution):
             else None,
             "end_time": self.end_time.isoformat(sep=" ") if self.end_time else None,
             "exit_code": self.exit_code,
-            "log_artifact": _assert_type(
-                self._log_artifact, _StorageArtifact
-            )._to_dict()
-            if self._log_artifact
-            else None,
+            "log_uri": self._log_reader.uri.to_dict() if self._log_reader else None,
         }
         return result
 
@@ -871,11 +863,12 @@ class ContainerExecution(Execution):
                 else None
             ),
             exit_code=dict["exit_code"],
-            _log_artifact=(
-                _StorageArtifact._from_dict(
-                    dict=dict["log_artifact"], provider=storage_provider
+            _log_reader=(
+                storage_providers.UriReader(
+                    uri=storage_providers.DataUri.from_dict(dict["log_uri"]),
+                    provider=storage_provider,
                 )
-                if dict["log_artifact"]
+                if dict["log_uri"]
                 else None
             ),
         )
