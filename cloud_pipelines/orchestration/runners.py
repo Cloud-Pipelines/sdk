@@ -142,9 +142,12 @@ class Runner:
             artifact_data_info_struct = json.loads(
                 artifact_data_info_uri.get_reader().download_as_text()
             )
-            artifact_data_info_struct["type_spec"] = artifact._type_spec
+            artifact_struct = {
+                "artifact_data": artifact_data_info_struct,
+                "type_spec": artifact._type_spec,
+            }
             existing_data_artifact = _StorageArtifact._from_dict(
-                artifact_data_info_struct, provider=self._root_uri._provider
+                artifact_struct, provider=self._root_uri._provider
             )
             # TODO: ! Delete the new artifact data
             assert existing_data_artifact._data_info == data_info
@@ -152,9 +155,9 @@ class Runner:
         else:
             # TODO: Rename the artifact to directory based on the data hash.
             artifact._data_info = data_info
-            artifact_data_info_struct = artifact._to_dict()
+            artifact_struct = artifact._to_dict()
+            artifact_data_info_struct = artifact_struct["artifact_data"]
             # TODO: Create ArtifactData class that holds the artifact URI and info, but not type or execution.
-            del artifact_data_info_struct["type_spec"]
 
             artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
             artifact_data_info_uri.get_writer().upload_from_text(artifact_data_info_str)
@@ -917,29 +920,33 @@ class _StorageArtifact(artifact_stores.Artifact):
 
     def _to_dict(self) -> dict:
         data_uri_dict = self._uri_reader.uri.to_dict()
-        result = {
-            # TODO: Create a TypeSpec class that represents type_spec and has .to_dict()
-            "type_spec": self._type_spec,
-            "data_uri": data_uri_dict,
+        artifact_data_dict = {
+            "uri": data_uri_dict,
         }
         data_info = getattr(self, "_data_info", None)
         if data_info:
-            result["data_info"] = dataclasses.asdict(data_info)
+            artifact_data_dict["info"] = dataclasses.asdict(data_info)
+        result = {
+            # TODO: Create a TypeSpec class that represents type_spec and has .to_dict()
+            "type_spec": self._type_spec,
+            "artifact_data": artifact_data_dict,
+        }
         return result
 
     @staticmethod
     def _from_dict(
         dict: dict, provider: storage_providers.StorageProvider
     ) -> "_StorageArtifact":
-        data_uri = storage_providers.DataUri.from_dict(dict["data_uri"])
+        artifact_data_dict = dict["artifact_data"]
+        data_uri = storage_providers.DataUri.from_dict(artifact_data_dict["uri"])
         uri_accessor = storage_providers.UriAccessor(uri=data_uri, provider=provider)
         type_spec = dict["type_spec"]
         storage_artifact = _StorageArtifact(
             uri_reader=uri_accessor.get_reader(), type_spec=type_spec
         )
-        if "data_info" in dict:
+        if "info" in artifact_data_dict:
             storage_artifact._data_info = storage_providers.DataInfo(
-                **dict["data_info"]
+                **artifact_data_dict["info"]
             )
         return storage_artifact
 
