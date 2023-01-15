@@ -439,7 +439,7 @@ class Runner:
                 outputs=output_artifacts,
             )
 
-            execution_id = (
+            execution._id = (
                 start_time.strftime("%Y-%m-%d_%H-%M-%S_%f") + "_" + uuid.uuid4().hex
             )
 
@@ -450,7 +450,7 @@ class Runner:
                     type_spec=output_specs[output_name].type,
                 )
 
-            execution_uri = self._executions_table_dir.make_subpath(execution_id)
+            execution_uri = self._executions_table_dir.make_subpath(execution._id)
 
             def write_execution_to_db():
                 execution_struct = execution._to_dict()
@@ -530,13 +530,12 @@ class Runner:
                         for output_name, uri_accessor in output_uris.items()
                     }
 
-                    cached_execution_with_id = (
+                    cached_execution = (
                         self._execution_cache.try_get_execution_from_cache(execution)
                     )
 
-                    if cached_execution_with_id:
-                        execution.__dict__ = cached_execution_with_id.execution.__dict__
-                        execution._execution_id = cached_execution_with_id.id
+                    if cached_execution:
+                        execution.__dict__ = cached_execution.__dict__
                         # TODO: Add information to the ExecutionNode to indicate that the execution was reused from cache
                         log_bytes = execution._log_reader.download_as_bytes()
                         execution.log = launchers.ProcessLog()
@@ -554,7 +553,7 @@ class Runner:
                         return None  # Cached
 
                     # Preparing the log artifact
-                    log_uri = self._generate_execution_log_uri(execution_id)
+                    log_uri = self._generate_execution_log_uri(execution._id)
                     execution._log_reader = log_uri.get_reader()
 
                     execution.status = ExecutionStatus.Starting
@@ -601,8 +600,7 @@ class Runner:
                     write_execution_to_db()
                     # Storing successful execution in the execution cache
                     if execution.status == ExecutionStatus.Succeeded:
-                        self._execution_cache.put_execution_id_in_cache(
-                            execution_id=execution_id,
+                        self._execution_cache.put_execution_in_cache(
                             execution=execution,
                         )
                     if execution.status == ExecutionStatus.Failed:
@@ -775,6 +773,7 @@ class ContainerExecution(Execution):
     _log_reader: Optional[storage_providers.UriReader] = None
     _waiters: Optional[Sequence[Callable[[], Any]]] = None
     _cache_key: Optional[str] = None
+    _id: Optional[str] = None
     # TODO: Launcher-specific info
 
     def __repr__(self):
@@ -988,11 +987,6 @@ def _assert_type(value: typing.Any, typ: typing.Type[_T]) -> _T:
     return value
 
 
-class _ExecutionWithId(typing.NamedTuple):
-    id: str
-    execution: ContainerExecution
-
-
 class _ExecutionCacheDb:
     OLDEST_EXECUTION_CACHE_SUB_KEY = "oldest"
     LATEST_EXECUTION_CACHE_SUB_KEY = "latest"
@@ -1009,7 +1003,7 @@ class _ExecutionCacheDb:
         self,
         execution_cache_key: str,
         tag: str,
-    ) -> Optional[_ExecutionWithId]:
+    ) -> Optional[ContainerExecution]:
         # TODO: Validate or sanitize cache_sub_key before using it as part of URI
         execution_id_uri = self._cached_execution_ids_table_dir.make_subpath(
             execution_cache_key
@@ -1024,7 +1018,8 @@ class _ExecutionCacheDb:
             execution_struct,
             storage_provider=self._executions_table_dir._provider,
         )
-        return _ExecutionWithId(id=execution_id, execution=loaded_execution)
+        loaded_execution._id = execution_id
+        return loaded_execution
 
     @staticmethod
     def get_execution_cache_key(
@@ -1056,7 +1051,7 @@ class _ExecutionCacheDb:
 
     def try_get_execution_from_cache(
         self, execution: ContainerExecution
-    ) -> Optional[_ExecutionWithId]:
+    ) -> Optional[ContainerExecution]:
         execution_cache_key = _ExecutionCacheDb.get_execution_cache_key(execution)
         execution._cache_key = execution_cache_key
         max_cached_data_staleness_str = (
@@ -1073,7 +1068,7 @@ class _ExecutionCacheDb:
         self,
         execution_cache_key: str,
         max_cached_data_staleness_str: Optional[str],
-    ) -> Optional[_ExecutionWithId]:
+    ) -> Optional[ContainerExecution]:
         # The cache reuse algorithm is pretty simple
         # if max_cache_staleness:
         #     Try reuse the execution with same max_cache_staleness (if viable) out of possibly many viable executions. This is a non-trivial part of the design.
@@ -1101,52 +1096,51 @@ class _ExecutionCacheDb:
             )
             current_time = datetime.datetime.utcnow()
 
-            period_cached_execution_with_id = (
+            period_cached_execution = (
                 self._try_load_execution_from_cache_by_key_and_tag(
                     execution_cache_key=execution_cache_key,
                     tag=max_cached_data_staleness_str,
                 )
             )
-            if period_cached_execution_with_id and (
-                period_cached_execution_with_id.execution.end_time
-                + max_cached_data_staleness
+            if period_cached_execution and (
+                period_cached_execution.end_time + max_cached_data_staleness
                 >= current_time
             ):
                 # Reuse period_cached_execution
-                return period_cached_execution_with_id
+                return period_cached_execution
             # If we cannot reuse the period-based execution, let's try the latest execution.
             # If the execution satisfies the max_cached_data_staleness condition, then we set the period-based execution pointer to it.
-            latest_cached_execution_with_id = (
+            latest_cached_execution = (
                 self._try_load_execution_from_cache_by_key_and_tag(
                     execution_cache_key=execution_cache_key,
                     tag=_ExecutionCacheDb.LATEST_EXECUTION_CACHE_SUB_KEY,
                 )
             )
-            if latest_cached_execution_with_id and (
-                latest_cached_execution_with_id.execution.end_time
-                + max_cached_data_staleness
+            if latest_cached_execution and (
+                latest_cached_execution.end_time + max_cached_data_staleness
                 >= current_time
             ):
                 # Setting the period-based execution pointer to the latest execution that we reuse.
+                assert latest_cached_execution._id
                 self._put_execution_id_in_cache_with_tag(
-                    execution_id=latest_cached_execution_with_id.id,
+                    execution_id=latest_cached_execution._id,
                     execution_cache_key=execution_cache_key,
                     tag=max_cached_data_staleness_str,
                 )
                 # Reuse latest_cached_execution
-                return latest_cached_execution_with_id
+                return latest_cached_execution
             # Could not find a suitable execution in the cache.
             return None
         else:
             # Trying to use the oldest execution.
             # This execution is "canonical" for the execution_cache_key and has the most cached downstream executions.
-            oldest_cached_execution_with_id = (
+            oldest_cached_execution = (
                 self._try_load_execution_from_cache_by_key_and_tag(
                     execution_cache_key=execution_cache_key,
                     tag=_ExecutionCacheDb.OLDEST_EXECUTION_CACHE_SUB_KEY,
                 )
             )
-            return oldest_cached_execution_with_id
+            return oldest_cached_execution
 
     def _put_execution_id_in_cache_with_tag(
         self,
@@ -1161,12 +1155,12 @@ class _ExecutionCacheDb:
         if overwrite or not cached_execution_id_uri.get_reader().exists():
             cached_execution_id_uri.get_writer().upload_from_text(execution_id)
 
-    def put_execution_id_in_cache(
+    def put_execution_in_cache(
         self,
-        execution_id: str,
         execution: ContainerExecution,
     ):
         assert execution._cache_key
+        assert execution._id
         execution_cache_key = execution._cache_key
         max_cached_data_staleness_str = (
             _ExecutionCacheDb._get_max_cached_data_staleness_from_task_spec(
@@ -1176,21 +1170,21 @@ class _ExecutionCacheDb:
         # Storing the references to the execution in the execution cache.
         # Setting the oldest execution only the first time.
         self._put_execution_id_in_cache_with_tag(
-            execution_id=execution_id,
+            execution_id=execution._id,
             execution_cache_key=execution_cache_key,
             tag=_ExecutionCacheDb.OLDEST_EXECUTION_CACHE_SUB_KEY,
             overwrite=False,
         )
         # Always updating the latest execution
         self._put_execution_id_in_cache_with_tag(
-            execution_id=execution_id,
+            execution_id=execution._id,
             execution_cache_key=execution_cache_key,
             tag=_ExecutionCacheDb.LATEST_EXECUTION_CACHE_SUB_KEY,
         )
         # Updating the period-based cache
         if max_cached_data_staleness_str:
             self._put_execution_id_in_cache_with_tag(
-                execution_id=execution_id,
+                execution_id=execution._id,
                 execution_cache_key=execution_cache_key,
                 tag=max_cached_data_staleness_str,
             )
