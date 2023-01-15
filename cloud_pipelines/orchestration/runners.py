@@ -450,19 +450,11 @@ class Runner:
                     type_spec=output_specs[output_name].type,
                 )
 
-            execution_uri = self._executions_table_dir.make_subpath(execution._id)
-
-            def write_execution_to_db():
+            def write_execution_to_db(execution: ContainerExecution):
+                assert execution._id
                 execution_struct = execution._to_dict()
                 execution_string = json.dumps(execution_struct, indent=2)
-                # # Verifying that the serialized execution can be loaded again
-                # reloaded_execution_struct = json.loads(execution_string)
-                # reloaded_execution = ContainerExecution._from_dict(
-                #     reloaded_execution_struct,
-                #     storage_provider=self._root_uri._provider,
-                # )
-                # execution.__dict__.update(reloaded_execution.__dict__)
-                # Storing the execution itself
+                execution_uri = self._executions_table_dir.make_subpath(execution._id)
                 execution_uri.get_writer().upload_from_text(execution_string)
 
             def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
@@ -558,7 +550,7 @@ class Runner:
 
                     execution.status = ExecutionStatus.Starting
                     log_message(message="Starting container task.")
-                    write_execution_to_db()
+                    write_execution_to_db(execution)
                     launched_container = self._task_launcher.launch_container_task(
                         task_spec=task_spec,
                         input_uri_readers=input_uri_readers,
@@ -567,7 +559,7 @@ class Runner:
                     )
                     execution.status = ExecutionStatus.Running
                     execution._launched_container = launched_container
-                    write_execution_to_db()
+                    write_execution_to_db(execution)
                     container_execution_result = launched_container.wait_for_completion(
                         on_log_entry_callback=on_log_entry_callback
                     )
@@ -597,7 +589,7 @@ class Runner:
                         message=f"Container task completed with status: {execution.status.name}"
                     )
                     # Storing the execution in the db
-                    write_execution_to_db()
+                    write_execution_to_db(execution)
                     # Storing successful execution in the execution cache
                     if execution.status == ExecutionStatus.Succeeded:
                         self._execution_cache.put_execution_in_cache(
@@ -613,7 +605,7 @@ class Runner:
                     execution.status = ExecutionStatus.SystemError
                     execution.end_time = datetime.datetime.utcnow()
                     execution._error_message = repr(ex)
-                    write_execution_to_db()
+                    write_execution_to_db(execution)
                     raise ExecutionFailedError(execution=execution) from ex
 
             container_launch_future = self._futures_executor.submit(
