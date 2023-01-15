@@ -430,9 +430,7 @@ class Runner:
             }
             output_artifacts = {}
 
-            start_time = datetime.datetime.utcnow()
             execution = ContainerExecution(
-                start_time=start_time,
                 task_spec=task_spec,
                 input_arguments=input_artifacts,
                 status=ExecutionStatus.WaitingForUpstream,
@@ -509,21 +507,6 @@ class Runner:
                             upstream_execution=failed_upstream_execution,
                         )
                         raise exception  # from e
-                    start_time = datetime.datetime.utcnow()
-                    execution.start_time = start_time
-
-                    input_uri_readers = {
-                        input_name: artifact._uri_reader
-                        for input_name, artifact in resolved_input_artifacts.items()
-                    }
-                    output_uris = {
-                        output_name: self._generate_artifact_data_uri()
-                        for output_name in output_names
-                    }
-                    output_uri_writers = {
-                        output_name: uri_accessor.get_writer()
-                        for output_name, uri_accessor in output_uris.items()
-                    }
 
                     cached_execution = (
                         self._execution_cache.try_get_execution_from_cache(execution)
@@ -547,12 +530,28 @@ class Runner:
                         log_message(message="Reused the execution from cache.")
                         return None  # Cached
 
+                    # Preparing to start new execution
                     execution._id = generate_execution_id()
+
+                    # Preparing artifacts, readers and writers
+                    output_uris = {
+                        output_name: self._generate_artifact_data_uri()
+                        for output_name in output_names
+                    }
+                    input_uri_readers = {
+                        input_name: artifact._uri_reader
+                        for input_name, artifact in resolved_input_artifacts.items()
+                    }
+                    output_uri_writers = {
+                        output_name: uri_accessor.get_writer()
+                        for output_name, uri_accessor in output_uris.items()
+                    }
 
                     # Preparing the log artifact
                     log_uri = self._generate_execution_log_uri(execution._id)
                     execution._log_reader = log_uri.get_reader()
 
+                    execution.start_time = datetime.datetime.utcnow()
                     execution.status = ExecutionStatus.Starting
                     log_message(message="Starting container task.")
                     write_execution_to_db(execution)
