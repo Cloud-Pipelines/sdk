@@ -439,15 +439,18 @@ class Runner:
                 outputs=output_artifacts,
             )
 
-            execution._id = (
-                start_time.strftime("%Y-%m-%d_%H-%M-%S_%f") + "_" + uuid.uuid4().hex
-            )
-
             for output_name in output_names:
                 output_artifacts[output_name] = _FutureExecutionOutputArtifact(
                     execution=execution,
                     output_name=output_name,
                     type_spec=output_specs[output_name].type,
+                )
+
+            def generate_execution_id():
+                return (
+                    datetime.datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S_%f")
+                    + "_"
+                    + uuid.uuid4().hex
                 )
 
             def write_execution_to_db(execution: ContainerExecution):
@@ -543,6 +546,8 @@ class Runner:
                                 log_message(message=log_line)
                         log_message(message="Reused the execution from cache.")
                         return None  # Cached
+
+                    execution._id = generate_execution_id()
 
                     # Preparing the log artifact
                     log_uri = self._generate_execution_log_uri(execution._id)
