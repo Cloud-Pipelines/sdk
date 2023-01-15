@@ -530,23 +530,8 @@ class Runner:
                         for output_name, uri_accessor in output_uris.items()
                     }
 
-                    # Getting max_cached_data_staleness
-                    max_cached_data_staleness_str = None
-                    if (
-                        task_spec.execution_options
-                        and task_spec.execution_options.caching_strategy
-                    ):
-                        max_cached_data_staleness_str = (
-                            task_spec.execution_options.caching_strategy.max_cache_staleness
-                        )
-
-                    execution_cache_key = self._execution_cache.get_execution_cache_key(
-                        execution
-                    )
                     cached_execution_with_id = (
-                        self._execution_cache.try_get_execution_by_key(
-                            execution_cache_key, max_cached_data_staleness_str
-                        )
+                        self._execution_cache.try_get_execution_from_cache(execution)
                     )
 
                     if cached_execution_with_id:
@@ -618,8 +603,7 @@ class Runner:
                     if execution.status == ExecutionStatus.Succeeded:
                         self._execution_cache.put_execution_id_in_cache(
                             execution_id=execution_id,
-                            execution_cache_key=execution_cache_key,
-                            max_cached_data_staleness_str=max_cached_data_staleness_str,
+                            execution=execution,
                         )
                     if execution.status == ExecutionStatus.Failed:
                         raise ExecutionFailedError(execution=execution)
@@ -790,6 +774,7 @@ class ContainerExecution(Execution):
     log: Optional[launchers.ProcessLog] = None
     _log_reader: Optional[storage_providers.UriReader] = None
     _waiters: Optional[Sequence[Callable[[], Any]]] = None
+    _cache_key: Optional[str] = None
     # TODO: Launcher-specific info
 
     def __repr__(self):
@@ -1057,6 +1042,33 @@ class _ExecutionCacheDb:
         )
         return execution_cache_key
 
+    @staticmethod
+    def _get_max_cached_data_staleness_from_task_spec(
+        task_spec: structures.TaskSpec,
+    ) -> Optional[str]:
+        # Getting max_cached_data_staleness
+        max_cached_data_staleness_str = None
+        if task_spec.execution_options and task_spec.execution_options.caching_strategy:
+            max_cached_data_staleness_str = (
+                task_spec.execution_options.caching_strategy.max_cache_staleness
+            )
+        return max_cached_data_staleness_str
+
+    def try_get_execution_from_cache(
+        self, execution: ContainerExecution
+    ) -> Optional[_ExecutionWithId]:
+        execution_cache_key = _ExecutionCacheDb.get_execution_cache_key(execution)
+        execution._cache_key = execution_cache_key
+        max_cached_data_staleness_str = (
+            _ExecutionCacheDb._get_max_cached_data_staleness_from_task_spec(
+                execution.task_spec
+            )
+        )
+        return self.try_get_execution_by_key(
+            execution_cache_key=execution_cache_key,
+            max_cached_data_staleness_str=max_cached_data_staleness_str,
+        )
+
     def try_get_execution_by_key(
         self,
         execution_cache_key: str,
@@ -1152,9 +1164,15 @@ class _ExecutionCacheDb:
     def put_execution_id_in_cache(
         self,
         execution_id: str,
-        execution_cache_key: str,
-        max_cached_data_staleness_str: Optional[str],
+        execution: ContainerExecution,
     ):
+        assert execution._cache_key
+        execution_cache_key = execution._cache_key
+        max_cached_data_staleness_str = (
+            _ExecutionCacheDb._get_max_cached_data_staleness_from_task_spec(
+                execution.task_spec
+            )
+        )
         # Storing the references to the execution in the execution cache.
         # Setting the oldest execution only the first time.
         self._put_execution_id_in_cache_with_tag(
