@@ -7,6 +7,7 @@ import json
 import logging
 import tempfile
 import os
+import threading
 import typing
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 import uuid
@@ -78,6 +79,7 @@ class Runner:
         self._artifact_data_info_table_dir = self._db_dir.make_subpath(
             relative_path="artifact_data_info"
         )
+        self._artifact_data_info_table_lock = threading.Lock()
 
     def _generate_artifact_data_uri(
         self,
@@ -96,6 +98,8 @@ class Runner:
             relative_path=data_key
         ).make_subpath(relative_path="data")
         # TODO: Detect the existence by querying the artifact DB, not the data storage.
+        # This method is currently only invoked from the single main thread and thus does not synchronization issues.
+        # Protect the DB access with `self._artifact_data_info_table_lock` if called from multiple threads.
         if not uri_accessor.get_reader().exists():
             # TODO: Make uploading reliable. Upload to temporary location then rename.
             uri_accessor.get_writer().upload_from_path(path=path)
@@ -139,28 +143,31 @@ class Runner:
         artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
             relative_path=data_key
         )
-        if artifact_data_info_uri.get_reader().exists():
-            # Returning the artifact object that points to existing data
-            # We expect the DB to not be in corrupted state.
-            # We expect that the existing data with same hash is the same as the new data
+        with self._artifact_data_info_table_lock:
+            if artifact_data_info_uri.get_reader().exists():
+                # Returning the artifact object that points to existing data
+                # We expect the DB to not be in corrupted state.
+                # We expect that the existing data with same hash is the same as the new data
 
-            artifact_data_info_struct = json.loads(
-                artifact_data_info_uri.get_reader().download_as_text()
-            )
-            artifact_data = _ArtifactDataStruct.from_dict(artifact_data_info_struct)
-            existing_data_artifact = _StorageArtifact(
-                artifact_data=artifact_data,
-                storage_provider=self._artifact_data_dir._provider,
-                type_spec=artifact._type_spec,
-            )
-            # TODO: ! Delete the new artifact data
-            return existing_data_artifact
-        else:
-            # TODO: Rename the artifact to directory based on the data hash.
-            artifact_data_info_struct = artifact._artifact_data.to_dict()
-            artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
-            artifact_data_info_uri.get_writer().upload_from_text(artifact_data_info_str)
-            return artifact
+                artifact_data_info_struct = json.loads(
+                    artifact_data_info_uri.get_reader().download_as_text()
+                )
+                artifact_data = _ArtifactDataStruct.from_dict(artifact_data_info_struct)
+                existing_data_artifact = _StorageArtifact(
+                    artifact_data=artifact_data,
+                    storage_provider=self._artifact_data_dir._provider,
+                    type_spec=artifact._type_spec,
+                )
+                # TODO: ! Delete the new artifact data
+                return existing_data_artifact
+            else:
+                # TODO: Rename the artifact to directory based on the data hash.
+                artifact_data_info_struct = artifact._artifact_data.to_dict()
+                artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
+                artifact_data_info_uri.get_writer().upload_from_text(
+                    artifact_data_info_str
+                )
+                return artifact
 
     def _generate_execution_log_uri(
         self, execution_id: str

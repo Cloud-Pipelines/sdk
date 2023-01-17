@@ -191,6 +191,14 @@ def _produce_and_consume_component(
 
 
 @components.create_component_from_func
+def produce_string(
+    string: str = "string",
+    dummy: str = "dummy",
+) -> str:
+    return string
+
+
+@components.create_component_from_func
 def produce_two_equal_strings(
     string: str = "string",
 ) -> typing.NamedTuple("Outputs", [("string1", str), ("string2", str),]):
@@ -643,7 +651,53 @@ class LaunchersTestCase(unittest.TestCase):
                     "The 'P5D==time_10' execution should have been reused.",
                 )
 
-    def test_output_artifacts_are_deduplicated(self):
+    def test_constant_artifacts_are_deduplicated(self):
+        # This test is probabilistic and might sometimes have false successes
+        # Running the whole test multiple times to increase the chance of detection
+        for _ in range(10):
+            with tempfile.TemporaryDirectory() as output_dir:
+                with runners.InteractiveMode(
+                    task_launcher=LocalEnvironmentLauncher(),
+                    root_uri=local_storage.LocalStorageProvider().make_uri(
+                        path=output_dir
+                    ),
+                ):
+                    # No need to launch many executions.
+                    # After first artifact reuse, all later artifacts are reused.
+                    # So the test becomes: "Was the 2nd execution's constant input artifact reused?"
+                    execution_1 = produce_string(string="str", dummy="1")
+                    execution_2 = produce_string(string="str", dummy="2")
+                    execution_1.wait_for_completion()
+                    execution_2.wait_for_completion()
+                    self.assertEqual(
+                        execution_1.input_arguments["string"]._uri_reader.uri.to_dict(),
+                        execution_2.input_arguments["string"]._uri_reader.uri.to_dict(),
+                    )
+
+    def test_output_artifacts_are_deduplicated_across_executions(self):
+        # This test is probabilistic and might sometimes have false successes
+        # Running the whole test multiple times to increase the chance of detection
+        for _ in range(10):
+            with tempfile.TemporaryDirectory() as output_dir:
+                with runners.InteractiveMode(
+                    task_launcher=LocalEnvironmentLauncher(),
+                    root_uri=local_storage.LocalStorageProvider().make_uri(
+                        path=output_dir
+                    ),
+                ):
+                    # No need to launch many executions.
+                    # After first artifact reuse, all later artifacts are reused.
+                    # So the test becomes: "Was the 2nd execution's output artifact reused?"
+                    execution_1 = produce_string(dummy="1")
+                    execution_2 = produce_string(dummy="2")
+                    execution_1.wait_for_completion()
+                    execution_2.wait_for_completion()
+                    self.assertEqual(
+                        execution_1.outputs["Output"]._uri_reader.uri.to_dict(),
+                        execution_2.outputs["Output"]._uri_reader.uri.to_dict(),
+                    )
+
+    def test_output_artifacts_are_deduplicated_in_same_execution(self):
         with tempfile.TemporaryDirectory() as output_dir:
             with runners.InteractiveMode(
                 task_launcher=LocalEnvironmentLauncher(),
