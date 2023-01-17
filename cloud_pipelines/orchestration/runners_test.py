@@ -1,6 +1,7 @@
 import datetime
 import os
 import tempfile
+import time
 import typing
 import unittest
 from unittest import mock
@@ -147,6 +148,15 @@ def generate_random_number(dummy: int = None) -> int:
 
 
 @components.create_component_from_func
+def wait_then_return_random(dummy: int = 42, wait_seconds: int = 1) -> int:
+    import random
+    import time
+
+    time.sleep(wait_seconds)
+    return random.randint(0, 100000000)
+
+
+@components.create_component_from_func
 def _produce_and_consume_component(
     output_model_path: components.OutputPath("Model"),
     input_dataset_path: components.InputPath("Dataset") = None,
@@ -196,6 +206,14 @@ def produce_string(
     dummy: str = "dummy",
 ) -> str:
     return string
+
+
+@components.create_component_from_func
+def produce_integer(
+    integer: int = 42,
+    dummy: int = 0,
+) -> int:
+    return integer
 
 
 @components.create_component_from_func
@@ -748,6 +766,69 @@ class LaunchersTestCase(unittest.TestCase):
                     .materialize()
                 )
                 self.assertEqual(result_1, result_2)
+
+    def test_reusing_running_execution_from_cache(self):
+        # How we test:
+        # We start multiple chains of tasks at the same time.
+        # To make things harder each chain starts with a different seed execution (which returns same outputs).
+        # If the algorithm works correctly, then only one execution is actually launched at each level of the chain.
+        # If at any level a running execution is not reused, then the chains will diverge and the final results will be different.
+        NUMBER_OF_CHAINS = 10
+        LENGTH_OF_CHAIN = 10
+        with tempfile.TemporaryDirectory() as output_dir:
+            with runners.InteractiveMode(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            ):
+                # ! Need to make sure that each inner list is different variable. Cannot use `[[]] * LENGTH_OF_CHAIN``
+                artifacts_at_level = [[] for _ in range(LENGTH_OF_CHAIN)]
+                for chain_idx in range(NUMBER_OF_CHAINS):
+                    # Start all chains with a a different task execution (different input arguments)
+                    result = produce_integer(dummy=chain_idx).outputs["Output"]
+                    for idx in range(LENGTH_OF_CHAIN):
+                        result = wait_then_return_random(dummy=result).outputs["Output"]
+                        artifacts_at_level[idx].append(result)
+                for idx in range(LENGTH_OF_CHAIN):
+                    unique_results = set(
+                        artifact.materialize() for artifact in artifacts_at_level[idx]
+                    )
+                    assert len(unique_results) == 1
+
+    def test_reusing_running_execution_from_cache_with_max_cache_staleness(self):
+        # We test the following two rules:
+        # 1. Do not reuse a running execution if it's not valid due to `max_cache_staleness`.
+        # 2. When reusing a running execution, take the oldest one (likely to finish first; stability).
+        with tempfile.TemporaryDirectory() as output_dir:
+            runner = runners.Runner(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            )
+            task1 = wait_then_return_random(wait_seconds=4)
+            execution1 = runner.run_task(task1)
+            result_art1 = execution1.outputs["Output"]
+
+            time.sleep(2)
+            # The execution1 is 2 seconds old at this point, but still running.
+            # This code won't reuse the execution1 since it's too stale (need to be no more than 1 seconds old).
+            task2 = wait_then_return_random(wait_seconds=4)
+            task2.execution_options = structures.ExecutionOptionsSpec(
+                caching_strategy=structures.CachingStrategySpec(
+                    max_cache_staleness="PT1S"
+                )
+            )
+            execution2 = runner.run_task(task2)
+            result_art2 = execution2.outputs["Output"]
+
+            time.sleep(1)
+            # The execution1 is 3 seconds old at this point, but still running.
+            # The execution2 is 1 seconds old at this point, but still running.
+            # This code will reuse the execution1 since it's the oldest running execution.
+            task3 = wait_then_return_random(wait_seconds=4)
+            execution3 = runner.run_task(task3)
+            result_art3 = execution3.outputs["Output"]
+
+            self.assertNotEqual(result_art2.materialize(), result_art1.materialize())
+            self.assertEqual(result_art3.materialize(), result_art1.materialize())
 
     def test_container_execution_logging_when_running(self):
         with tempfile.TemporaryDirectory() as output_dir:

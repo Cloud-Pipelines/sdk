@@ -9,7 +9,7 @@ import tempfile
 import os
 import threading
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 import uuid
 
 
@@ -515,11 +515,12 @@ class Runner:
                         )
                         raise exception  # from e
 
-                    cached_execution = (
-                        self._execution_cache.try_get_execution_from_cache(execution)
-                    )
+                    (
+                        cached_execution,
+                        execution_kind,
+                    ) = self._execution_cache.try_get_execution_from_cache(execution)
 
-                    if cached_execution:
+                    if execution_kind == _ExecutionCacheDb.CacheResult.Succeeded:
                         execution.__dict__ = cached_execution.__dict__
                         # TODO: Add information to the ExecutionNode to indicate that the execution was reused from cache
                         log_bytes = execution._log_reader.download_as_bytes()
@@ -536,6 +537,35 @@ class Runner:
                                 log_message(message=log_line)
                         log_message(message="Reused the execution from cache.")
                         return None  # Cached
+                    elif execution_kind == _ExecutionCacheDb.CacheResult.Running:
+                        # Replacing the internals of our executions with the existing running execution.
+                        # Need to preserve the waiter.
+                        # Otherwise the consumers might see a state where the execution wait is over, but the artifacts are not set yet.
+                        # ! Important! Need to make copy of the `cached_execution.__dict__`.
+                        # Otherwise we'll be modifying the original running execution
+                        running_execution_state = dict(cached_execution.__dict__)
+                        del running_execution_state["_waiters"]
+                        execution.__dict__.update(running_execution_state)
+                        log_message(message="Reusing the running execution from cache.")
+                        # Waiting for the original execution.
+                        # This seems to be the easiest way to make the consumers waiting on the new execution
+                        cached_execution.wait_for_completion()
+                        # TODO: There is a very small chance of race condition here if we got here before the `cached_execution._waiters` variable was set.
+                        # It's highly unlikely since the `_waiters` variable is set immediately after launching the new thread which puts the execution in cache.
+                        if cached_execution.status != ExecutionStatus.Succeeded:
+                            raise AssertionError(
+                                f"Expected the reused execution to have succeeded, but got: {cached_execution.__dict__}"
+                            )
+
+                        # Copying all internals the second time to copy the final execution state (output artifacts, exit_code, status).
+                        execution.__dict__ = cached_execution.__dict__
+                        for artifact in execution.outputs.values():
+                            if not isinstance(artifact, _StorageArtifact):
+                                raise AssertionError(
+                                    f"Expected the reused execution output artifacts to be resolved, but got: {cached_execution.__dict__}"
+                                )
+                        # TODO: Stream logs from the running execution
+                        return None
 
                     # Preparing to start new execution
                     execution._id = generate_execution_id()
@@ -994,6 +1024,11 @@ class _ExecutionCacheDb:
     OLDEST_EXECUTION_CACHE_SUB_KEY = "oldest"
     LATEST_EXECUTION_CACHE_SUB_KEY = "latest"
 
+    class CacheResult(enum.Enum):
+        New = 0
+        Succeeded = 1
+        Running = 2
+
     def __init__(
         self,
         cached_execution_ids_table_dir: storage_providers.UriAccessor,
@@ -1001,6 +1036,9 @@ class _ExecutionCacheDb:
     ):
         self._executions_table_dir = executions_table_dir
         self._cached_execution_ids_table_dir = cached_execution_ids_table_dir
+        self._running_executions_cache: Dict[str, List[ContainerExecution]] = {}
+        # We could use one lock per execution_cache_key...
+        self._running_executions_cache_lock = threading.Lock()
 
     def _try_load_execution_from_cache_by_key_and_tag(
         self,
@@ -1054,7 +1092,7 @@ class _ExecutionCacheDb:
 
     def try_get_execution_from_cache(
         self, execution: ContainerExecution
-    ) -> Optional[ContainerExecution]:
+    ) -> Tuple[ContainerExecution, CacheResult]:
         execution_cache_key = _ExecutionCacheDb.get_execution_cache_key(execution)
         execution._cache_key = execution_cache_key
         max_cached_data_staleness_str = (
@@ -1062,16 +1100,7 @@ class _ExecutionCacheDb:
                 execution.task_spec
             )
         )
-        return self.try_get_execution_by_key(
-            execution_cache_key=execution_cache_key,
-            max_cached_data_staleness_str=max_cached_data_staleness_str,
-        )
 
-    def try_get_execution_by_key(
-        self,
-        execution_cache_key: str,
-        max_cached_data_staleness_str: Optional[str],
-    ) -> Optional[ContainerExecution]:
         # The cache reuse algorithm is pretty simple
         # if max_cache_staleness:
         #     Try reuse the execution with same max_cache_staleness (if viable) out of possibly many viable executions. This is a non-trivial part of the design.
@@ -1084,6 +1113,7 @@ class _ExecutionCacheDb:
         #     If the "oldest" pointer is unset, then set it to the new execution
         #     Set the "latest" pointer to the new execution
 
+        current_time = datetime.datetime.utcnow()
         if max_cached_data_staleness_str:
             # First try to reuse execution with same max_cached_data_staleness.
             # This stabilizes which executions are reused.
@@ -1097,7 +1127,6 @@ class _ExecutionCacheDb:
             max_cached_data_staleness = isodate.parse_duration(
                 max_cached_data_staleness_str
             )
-            current_time = datetime.datetime.utcnow()
 
             period_cached_execution = (
                 self._try_load_execution_from_cache_by_key_and_tag(
@@ -1110,7 +1139,7 @@ class _ExecutionCacheDb:
                 >= current_time
             ):
                 # Reuse period_cached_execution
-                return period_cached_execution
+                return period_cached_execution, _ExecutionCacheDb.CacheResult.Succeeded
             # If we cannot reuse the period-based execution, let's try the latest execution.
             # If the execution satisfies the max_cached_data_staleness condition, then we set the period-based execution pointer to it.
             latest_cached_execution = (
@@ -1131,9 +1160,23 @@ class _ExecutionCacheDb:
                     tag=max_cached_data_staleness_str,
                 )
                 # Reuse latest_cached_execution
-                return latest_cached_execution
+                return latest_cached_execution, _ExecutionCacheDb.CacheResult.Succeeded
             # Could not find a suitable execution in the cache.
-            return None
+            # TODO: Lock before looking in the cache DB to avoid small a race condition window:
+            # Execution: Running -> Succeeded; Cache check: Check Succeeded, then check Running
+            with self._running_executions_cache_lock:
+                running_executions = self._running_executions_cache.setdefault(
+                    execution_cache_key, []
+                )
+                for running_execution in running_executions:
+                    if (
+                        running_execution.start_time + max_cached_data_staleness
+                        >= current_time
+                    ):
+                        return running_execution, _ExecutionCacheDb.CacheResult.Running
+                execution.start_time = current_time
+                running_executions.append(execution)
+            return execution, _ExecutionCacheDb.CacheResult.New
         else:
             # Trying to use the oldest execution.
             # This execution is "canonical" for the execution_cache_key and has the most cached downstream executions.
@@ -1143,7 +1186,18 @@ class _ExecutionCacheDb:
                     tag=_ExecutionCacheDb.OLDEST_EXECUTION_CACHE_SUB_KEY,
                 )
             )
-            return oldest_cached_execution
+            if oldest_cached_execution:
+                return oldest_cached_execution, _ExecutionCacheDb.CacheResult.Succeeded
+            with self._running_executions_cache_lock:
+                running_executions = self._running_executions_cache.setdefault(
+                    execution_cache_key, []
+                )
+                if running_executions:
+                    oldest_execution = running_executions[0]
+                    return oldest_execution, _ExecutionCacheDb.CacheResult.Running
+                execution.start_time = current_time
+                running_executions.append(execution)
+            return execution, _ExecutionCacheDb.CacheResult.New
 
     def _put_execution_id_in_cache_with_tag(
         self,
@@ -1191,3 +1245,9 @@ class _ExecutionCacheDb:
                 execution_cache_key=execution_cache_key,
                 tag=max_cached_data_staleness_str,
             )
+        # Remove the execution from the running execution cache
+        with self._running_executions_cache_lock:
+            # The execution is supposed to exist in the running executions cache
+            self._running_executions_cache[execution_cache_key].remove(execution)
+            if not self._running_executions_cache[execution_cache_key]:
+                del self._running_executions_cache[execution_cache_key]
