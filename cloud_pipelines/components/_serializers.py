@@ -1,3 +1,6 @@
+from typing import Any, Callable, Dict
+
+
 def _serialize_str(str_value: str) -> str:
     if not isinstance(str_value, str):
         raise TypeError(
@@ -126,6 +129,11 @@ _deserializers["Boolean"] = _deserialize_boolean
 _deserializers["JsonArray"] = _deserialize_json_array
 _deserializers["JsonObject"] = _deserialize_json_object
 
+SAVER_TYPE = Callable[[Any, str], None]
+LOADER_TYPE = Callable[[str], Any]
+savers: Dict[str, SAVER_TYPE] = {}
+loaders: Dict[str, LOADER_TYPE] = {}
+
 _python_type_mappers = []
 # Converting generic type aliases: typing.List -> list, typing.Dict -> dict
 _python_type_mappers.append(lambda typ: getattr(type, "__origin__", typ))
@@ -146,3 +154,11 @@ _alias_type_name_to_canonical["Dictionary"] = "JsonObject"
 # _alias_type_name_to_canonical["typing.Dict"] = "JsonArray"
 _alias_type_name_to_canonical["Dict"] = "JsonObject"
 _alias_type_name_to_canonical["dict"] = "JsonObject"
+
+python_type_name_to_type_spec = {}
+python_type_name_to_type_spec["str"] = "String"
+python_type_name_to_type_spec["int"] = "Integer"
+python_type_name_to_type_spec["float"] = "Float"
+python_type_name_to_type_spec["bool"] = "Boolean"
+python_type_name_to_type_spec["list"] = "JsonArray"
+python_type_name_to_type_spec["dict"] = "JsonObject"

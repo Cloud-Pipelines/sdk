@@ -18,11 +18,21 @@ def save(
             typ=type(obj)
         )
         if not type_spec:
-            type_spec = _get_full_class_name(obj)
+            full_class_name = _get_full_class_name(obj)
+            # TODO: Streamline the type -> type_spec -> type_name conversions
+            type_spec = _serializers.python_type_name_to_type_spec.get(
+                full_class_name, full_class_name
+            )
+
         warnings.warn(
             f'Missing type spec was inferred as "{type_spec}" based on the object "{obj}".'
         )
     type_name = _type_spec_to_type_name(type_spec)
+
+    saver = _serializers.savers.get(type_name)
+    if saver:
+        saver(obj, path)
+        return type_spec
 
     serialized_value = _internal_data_passing.serialize_value(
         value=obj, type_name=type_name
@@ -62,8 +72,21 @@ def load(
     path: str,
     type_spec: _structures.TypeSpecType,
 ) -> Any:
+    type_name = _type_spec_to_type_name(type_spec)
+    loader = _serializers.loaders.get(type_name)
+    if loader:
+        return loader(path)
     deserializer = _get_deserializer_for_type_spec(type_spec=type_spec)
     if not deserializer:
         raise ValueError(f"Could not find deserializer for type spec: {type_spec}")
     string = pathlib.Path(path).read_text()
     return deserializer(string)
+
+
+# def load(
+#     path: str,
+#     type_spec: _structures.TypeSpecType,
+#     cls: Optional[Type[T]] = None,
+# ) -> T:
+#     loader = get_deserializer_for_type_struct(type_spec)
+#     return loader(path=path)
