@@ -22,3 +22,28 @@ def load_from_apache_parquet(path: str):
 _serializers.python_type_name_to_type_spec["pandas.DataFrame"] = "ApacheParquet"
 _serializers.savers["ApacheParquet"] = save_to_apache_parquet
 _serializers.loaders["ApacheParquet"] = load_from_apache_parquet
+
+
+def save_as_TensorflowSavedModel(obj, path: str):
+    import tensorflow
+
+    try:
+        tensorflow.keras.models.save_model(model=obj, filepath=path)
+    except:
+        tensorflow.saved_model.save(obj=obj, export_dir=path)
+
+
+def load_from_TensorflowSavedModel(path: str):
+    import tensorflow
+
+    try:
+        return tensorflow.keras.models.load_model(filepath=path)
+    except:
+        return tensorflow.saved_model.load(export_dir=path)
+
+
+_serializers.python_type_name_to_type_spec[
+    "tensorflow.python.training.tracking.base.Trackable"
+] = "TensorflowSavedModel"
+_serializers.savers["TensorflowSavedModel"] = save_as_TensorflowSavedModel
+_serializers.loaders["TensorflowSavedModel"] = load_from_TensorflowSavedModel

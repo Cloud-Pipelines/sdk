@@ -42,6 +42,38 @@ class ComponentsSerializersMLTestCase(unittest.TestCase):
             output_df = output_art.materialize()
             assert output_df.columns.to_list() == ["feature3"]
 
+    def test_TensorflowSavedModel(self):
+        def transform_keras_model(
+            model_path: InputPath("TensorflowSavedModel"),
+            output_model_path: OutputPath("TensorflowSavedModel"),
+        ):
+            import tensorflow
+
+            model = tensorflow.keras.models.load_model(filepath=model_path)
+            print(model)
+            tensorflow.keras.models.save_model(model=model, filepath=output_model_path)
+
+        transform_keras_model_op = create_component_from_func(
+            func=transform_keras_model,
+            base_image="tensorflow/tensorflow:2.11.0",
+        )
+
+        import tensorflow as tf
+
+        with runners.InteractiveMode():
+            input_model = tf.keras.Sequential(
+                [tf.keras.layers.Dense(5, input_shape=(3,)), tf.keras.layers.Softmax()]
+            )
+            output_art = transform_keras_model_op(model=input_model).outputs[
+                "output_model"
+            ]
+            output_model = output_art.materialize()
+            assert output_model
+            assert output_model.signatures
+            assert output_model.variables
+            predictions = output_model([[0.1, 0.2, 0.3]])
+            assert predictions.shape == (1, 5)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
