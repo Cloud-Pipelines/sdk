@@ -162,3 +162,6 @@ python_type_name_to_type_spec["float"] = "Float"
 python_type_name_to_type_spec["bool"] = "Boolean"
 python_type_name_to_type_spec["list"] = "JsonArray"
 python_type_name_to_type_spec["dict"] = "JsonObject"
+
+
+from . import _serializers_ml
