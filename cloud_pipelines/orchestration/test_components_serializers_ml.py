@@ -71,7 +71,7 @@ class ComponentsSerializersMLTestCase(unittest.TestCase):
             assert output_model
             assert output_model.signatures
             assert output_model.variables
-            predictions = output_model([[0.1, 0.2, 0.3]])
+            predictions = output_model(tf.constant([[0.1, 0.2, 0.3]]))
             assert predictions.shape == (1, 5)
 
 
