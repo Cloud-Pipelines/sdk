@@ -343,7 +343,9 @@ class Runner:
                         str(type(argument).__name__), str(argument)
                     )
                 )
-        full_input_arguments = task_spec.arguments or {}
+        full_input_arguments = {}
+        if task_spec.arguments:
+            full_input_arguments.update(task_spec.arguments)
         if input_arguments:
             full_input_arguments.update(input_arguments)
 
