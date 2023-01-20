@@ -840,21 +840,6 @@ class ContainerExecution(Execution):
         }
         return result
 
-    def _to_cache_key_dict(self) -> dict:
-        input_artifact_uri_structs = {
-            input_name: _assert_type(
-                artifact, _StorageArtifact
-            )._uri_reader.uri.to_dict()
-            for input_name, artifact in self.input_arguments.items()
-        }
-        component_struct = self.task_spec.component_ref.spec.to_dict()
-        result = {
-            # Execution
-            "component_spec": component_struct,
-            "input_artifact_uri_structs": input_artifact_uri_structs,
-        }
-        return result
-
     @staticmethod
     def _from_dict(
         dict: dict, storage_provider: storage_providers.StorageProvider
@@ -1066,7 +1051,9 @@ class _ExecutionCacheDb:
     def get_execution_cache_key(
         execution: ContainerExecution,
     ):
-        execution_cache_key_struct = execution._to_cache_key_dict()
+        execution_cache_key_struct = _ExecutionCacheDb._get_execution_cache_key_dict(
+            execution
+        )
         execution_cache_key_struct_string = json.dumps(
             execution_cache_key_struct, sort_keys=True
         )
@@ -1077,6 +1064,22 @@ class _ExecutionCacheDb:
             ).hexdigest()
         )
         return execution_cache_key
+
+    @staticmethod
+    def _get_execution_cache_key_dict(execution) -> dict:
+        input_artifact_uri_structs = {
+            input_name: _assert_type(
+                artifact, _StorageArtifact
+            )._uri_reader.uri.to_dict()
+            for input_name, artifact in execution.input_arguments.items()
+        }
+        component_struct = execution.task_spec.component_ref.spec.to_dict()
+        result = {
+            # Execution
+            "component_spec": component_struct,
+            "input_artifact_uri_structs": input_artifact_uri_structs,
+        }
+        return result
 
     @staticmethod
     def _get_max_cached_data_staleness_from_task_spec(
