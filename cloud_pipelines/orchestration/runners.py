@@ -786,30 +786,46 @@ class ExecutionStatus(enum.Enum):
     SystemError = 8
 
 
-@dataclasses.dataclass
+# TODO: Add outer_execution and task_id attributes to the Execution class
 class Execution:
-    task_spec: structures.TaskSpec
-    input_arguments: Mapping[str, artifact_stores.Artifact]
-    outputs: Mapping[str, artifact_stores.Artifact]
+    def __init__(
+        self,
+        task_spec: structures.TaskSpec,
+        input_arguments: Mapping[str, artifact_stores.Artifact],
+        outputs: Mapping[str, artifact_stores.Artifact],
+    ):
+        self.task_spec = task_spec
+        self.input_arguments = input_arguments
+        self.outputs = outputs
+        self._waiters: Optional[List[Callable[[], Any]]] = None
 
     def wait_for_completion(self):
         for waiter in self._waiters or []:
             waiter()
 
 
-@dataclasses.dataclass
 class ContainerExecution(Execution):
-    status: ExecutionStatus = ExecutionStatus.Invalid
-    start_time: Optional[datetime.datetime] = None
-    end_time: Optional[datetime.datetime] = None
-    exit_code: Optional[int] = None
-    # TODO: Integrate the `log` with `_log_artifact`
-    log: Optional[launchers.ProcessLog] = None
-    _log_reader: Optional[storage_providers.UriReader] = None
-    _waiters: Optional[Sequence[Callable[[], Any]]] = None
-    _cache_key: Optional[str] = None
-    _id: Optional[str] = None
-    # TODO: Launcher-specific info
+    def __init__(
+        self,
+        task_spec: structures.TaskSpec,
+        input_arguments: Mapping[str, artifact_stores.Artifact],
+        outputs: Mapping[str, artifact_stores.Artifact],
+        status: ExecutionStatus = ExecutionStatus.Invalid,
+    ):
+        super().__init__(
+            task_spec=task_spec, input_arguments=input_arguments, outputs=outputs
+        )
+        self.status = status
+        self.start_time: Optional[datetime.datetime] = None
+        self.end_time: Optional[datetime.datetime] = None
+        self.exit_code: Optional[int] = None
+        # TODO: Integrate the `log` with `_log_artifact`
+        self.log: Optional[launchers.ProcessLog] = None
+        self._log_reader: Optional[storage_providers.UriReader] = None
+        self._waiters: Optional[Sequence[Callable[[], Any]]] = None
+        self._cache_key: Optional[str] = None
+        self._id: Optional[str] = None
+        # TODO: Launcher-specific info
 
     def __repr__(self):
         component_spec = self.task_spec.component_ref.spec
@@ -846,7 +862,7 @@ class ContainerExecution(Execution):
     def _from_dict(
         dict: dict, storage_provider: storage_providers.StorageProvider
     ) -> "ContainerExecution":
-        return ContainerExecution(
+        execution = ContainerExecution(
             task_spec=structures.TaskSpec.from_dict(dict["task_spec"]),
             input_arguments={
                 input_name: _StorageArtifact._from_dict(
@@ -860,34 +876,35 @@ class ContainerExecution(Execution):
                 )
                 for output_name, artifact_struct in dict["output_artifacts"].items()
             },
-            # status=ExecutionStatus(dict["status"]),
             status=ExecutionStatus[dict["status"]],
-            start_time=(
-                datetime.datetime.fromisoformat(dict["start_time"])
-                if dict["start_time"]
-                else None
-            ),
-            end_time=(
-                datetime.datetime.fromisoformat(dict["end_time"])
-                if dict["end_time"]
-                else None
-            ),
-            exit_code=dict["exit_code"],
-            _log_reader=(
-                storage_providers.UriReader(
-                    uri=storage_providers.DataUri.from_dict(dict["log_uri"]),
-                    provider=storage_provider,
-                )
-                if dict["log_uri"]
-                else None
-            ),
         )
+        if dict["start_time"]:
+            execution.start_time = datetime.datetime.fromisoformat(dict["start_time"])
+        if dict["end_time"]:
+            execution.end_time = datetime.datetime.fromisoformat(dict["end_time"])
+        if dict["exit_code"]:
+            execution.exit_code = dict["exit_code"]
+        if dict["log_uri"]:
+            execution._log_reader = storage_providers.UriReader(
+                uri=storage_providers.DataUri.from_dict(dict["log_uri"]),
+                provider=storage_provider,
+            )
+        return execution
 
 
-@dataclasses.dataclass
 class GraphExecution(Execution):
-    task_executions: Mapping[str, Execution]
-    _waiters: Optional[Sequence[Callable[[], Any]]] = None
+    def __init__(
+        self,
+        task_spec: structures.TaskSpec,
+        input_arguments: Mapping[str, artifact_stores.Artifact],
+        outputs: Mapping[str, artifact_stores.Artifact],
+        task_executions: Mapping[str, Execution],
+    ):
+        super().__init__(
+            task_spec=task_spec, input_arguments=input_arguments, outputs=outputs
+        )
+        self.task_executions = task_executions
+        self._waiters: Optional[Sequence[Callable[[], Any]]] = None
 
 
 class ExecutionFailedError(Exception):
