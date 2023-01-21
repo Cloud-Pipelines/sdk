@@ -1240,6 +1240,27 @@ class _ExecutionCacheDb:
         if overwrite or not cached_execution_id_uri.get_reader().exists():
             cached_execution_id_uri.get_writer().upload_from_text(execution_id)
 
+    def _write_execution_cache_key_dict(
+        self,
+        execution: ContainerExecution,
+    ):
+        assert execution._cache_key
+        execution_cache_key_struct = _ExecutionCacheDb._get_execution_cache_key_dict(
+            execution
+        )
+        execution_cache_key_struct_string = json.dumps(
+            execution_cache_key_struct, sort_keys=True
+        )
+        execution_cache_key_dict_uri = (
+            self._cached_execution_ids_table_dir.make_subpath(
+                execution._cache_key
+            ).make_subpath("execution_cache_key_dict.json")
+        )
+        if not execution_cache_key_dict_uri.get_reader().exists():
+            execution_cache_key_dict_uri.get_writer().upload_from_text(
+                execution_cache_key_struct_string
+            )
+
     def put_execution_in_cache(
         self,
         execution: ContainerExecution,
@@ -1252,6 +1273,8 @@ class _ExecutionCacheDb:
                 execution.task_spec
             )
         )
+        # Store the execution cache key dict (mostly for debug purposes).
+        self._write_execution_cache_key_dict(execution)
         # Storing the references to the execution in the execution cache.
         # Setting the oldest execution only the first time.
         self._put_execution_id_in_cache_with_tag(
