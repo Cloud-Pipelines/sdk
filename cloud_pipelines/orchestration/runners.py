@@ -119,6 +119,7 @@ class Runner:
             storage_provider=self._artifact_data_dir._provider,
             type_spec=type_spec,
         )
+        artifact._artifact_data_id = data_key
         return artifact
 
     def _create_artifact_from_object(
@@ -158,6 +159,7 @@ class Runner:
                     storage_provider=self._artifact_data_dir._provider,
                     type_spec=artifact._type_spec,
                 )
+                existing_data_artifact._artifact_data_id = data_key
                 # TODO: ! Delete the new artifact data
                 return existing_data_artifact
             else:
@@ -167,6 +169,7 @@ class Runner:
                 artifact_data_info_uri.get_writer().upload_from_text(
                     artifact_data_info_str
                 )
+                artifact._artifact_data_id = data_key
                 return artifact
 
     def _generate_execution_log_uri(
@@ -959,6 +962,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         self._uri_reader = storage_providers.UriAccessor(
             uri=artifact_data.uri, provider=storage_provider
         ).get_reader()
+        self._artifact_data_id: Optional[str] = None
 
     def _download_to_path(self, path: str):
         self._uri_reader.download_to_path(path=path)
@@ -974,6 +978,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         result = {
             # TODO: Create a TypeSpec class that represents type_spec and has .to_dict()
             "type_spec": self._type_spec,
+            "artifact_data_id": self._artifact_data_id,
             "artifact_data": artifact_data_dict,
         }
         return result
@@ -988,6 +993,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         storage_artifact = _StorageArtifact(
             artifact_data=artifact_data, storage_provider=provider, type_spec=type_spec
         )
+        storage_artifact._artifact_data_id = dict.get("artifact_data_id")
         return storage_artifact
 
 
