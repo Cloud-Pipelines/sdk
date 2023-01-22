@@ -160,6 +160,9 @@ class Runner:
                     type_spec=artifact._type_spec,
                 )
                 existing_data_artifact._artifact_data_id = data_key
+                existing_data_artifact._execution = artifact._execution
+                existing_data_artifact._execution_id = artifact._execution_id
+                existing_data_artifact._output_name = artifact._output_name
                 # TODO: ! Delete the new artifact data
                 return existing_data_artifact
             else:
@@ -625,6 +628,9 @@ class Runner:
                                 storage_provider=output_uri._provider,
                                 type_spec=output_specs[output_name].type,
                             )
+                            output_artifact._execution = execution
+                            output_artifact._execution_id = execution._id
+                            output_artifact._output_name = output_name
                             output_artifact = self._deduplicate_storage_artifact(
                                 artifact=output_artifact
                             )
@@ -963,6 +969,9 @@ class _StorageArtifact(artifact_stores.Artifact):
             uri=artifact_data.uri, provider=storage_provider
         ).get_reader()
         self._artifact_data_id: Optional[str] = None
+        self._execution: Optional[ContainerExecution] = None
+        self._execution_id: Optional[str] = None
+        self._output_name: Optional[str] = None
 
     def _download_to_path(self, path: str):
         self._uri_reader.download_to_path(path=path)
@@ -981,6 +990,10 @@ class _StorageArtifact(artifact_stores.Artifact):
             "artifact_data_id": self._artifact_data_id,
             "artifact_data": artifact_data_dict,
         }
+        if self._execution_id:
+            assert self._output_name
+            result["execution_id"] = self._execution_id
+            result["output_name"] = self._output_name
         return result
 
     @staticmethod
@@ -994,6 +1007,9 @@ class _StorageArtifact(artifact_stores.Artifact):
             artifact_data=artifact_data, storage_provider=provider, type_spec=type_spec
         )
         storage_artifact._artifact_data_id = dict.get("artifact_data_id")
+        storage_artifact._execution_id = dict.get("execution_id")
+        storage_artifact._output_name = dict.get("output_name")
+        # The `_execution` attribute is not populated. It can be populated lazily.
         return storage_artifact
 
 
