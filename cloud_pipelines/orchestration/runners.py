@@ -72,9 +72,16 @@ class Runner:
         self._cached_execution_ids_table_dir = self._db_dir.make_subpath(
             relative_path="container_executions_cache"
         )
+        self._execution_db = _ExecutionStore(
+            executions_table_dir=self._executions_table_dir,
+            artifact_storage_provider=self._artifact_data_dir._provider,
+        )
+        self._execution_logs_store = _ExecutionLogsStore(
+            execution_logs_dir=self._execution_logs_dir
+        )
         self._execution_cache = _ExecutionCacheDb(
             cached_execution_ids_table_dir=self._cached_execution_ids_table_dir,
-            executions_table_dir=self._executions_table_dir,
+            execution_db=self._execution_db,
         )
         self._artifact_data_info_table_dir = self._db_dir.make_subpath(
             relative_path="artifact_data_info"
@@ -174,14 +181,6 @@ class Runner:
                 )
                 artifact._artifact_data_id = data_key
                 return artifact
-
-    def _generate_execution_log_uri(
-        self, execution_id: str
-    ) -> storage_providers.UriAccessor:
-        # Should the log file have name "log.txt" or "data" like all artifacts?
-        return self._execution_logs_dir.make_subpath(
-            relative_path=execution_id
-        ).make_subpath(relative_path="log.txt")
 
     def _run_graph_task(
         self,
@@ -459,20 +458,6 @@ class Runner:
                     type_spec=output_specs[output_name].type,
                 )
 
-            def generate_execution_id():
-                return (
-                    datetime.datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S_%f")
-                    + "_"
-                    + uuid.uuid4().hex
-                )
-
-            def write_execution_to_db(execution: ContainerExecution):
-                assert execution._id
-                execution_struct = execution._to_dict()
-                execution_string = json.dumps(execution_struct, indent=2)
-                execution_uri = self._executions_table_dir.make_subpath(execution._id)
-                execution_uri.get_writer().upload_from_text(execution_string)
-
             def add_task_ids_to_log_entries(log_entry: launchers.ProcessLogEntry):
                 if task_id_stack:
                     if not log_entry.annotations:
@@ -575,9 +560,6 @@ class Runner:
                         # TODO: Stream logs from the running execution
                         return None
 
-                    # Preparing to start new execution
-                    execution._id = generate_execution_id()
-
                     # Preparing artifacts, readers and writers
                     output_uris = {
                         output_name: self._generate_artifact_data_uri()
@@ -592,14 +574,21 @@ class Runner:
                         for output_name, uri_accessor in output_uris.items()
                     }
 
+                    start_time = datetime.datetime.utcnow()
+                    execution.start_time = start_time
+                    execution.status = ExecutionStatus.Starting
+
                     # Preparing the log artifact
-                    log_uri = self._generate_execution_log_uri(execution._id)
+                    log_uri = self._execution_logs_store.generate_execution_log_uri(
+                        execution.start_time
+                    )
                     execution._log_reader = log_uri.get_reader()
 
-                    execution.start_time = datetime.datetime.utcnow()
-                    execution.status = ExecutionStatus.Starting
+                    # Generating execution ID and writing the Execution to the DB.
+                    self._execution_db.create_execution(execution)
+                    assert execution._id
+
                     log_message(message="Starting container task.")
-                    write_execution_to_db(execution)
                     launched_container = self._task_launcher.launch_container_task(
                         task_spec=task_spec,
                         input_uri_readers=input_uri_readers,
@@ -608,7 +597,7 @@ class Runner:
                     )
                     execution.status = ExecutionStatus.Running
                     execution._launched_container = launched_container
-                    write_execution_to_db(execution)
+                    self._execution_db.update_execution(execution)
                     container_execution_result = launched_container.wait_for_completion(
                         on_log_entry_callback=on_log_entry_callback
                     )
@@ -641,7 +630,7 @@ class Runner:
                         message=f"Container task completed with status: {execution.status.name}"
                     )
                     # Storing the execution in the db
-                    write_execution_to_db(execution)
+                    self._execution_db.update_execution(execution)
                     # Storing successful execution in the execution cache
                     if execution.status == ExecutionStatus.Succeeded:
                         self._execution_cache.put_execution_in_cache(
@@ -657,7 +646,7 @@ class Runner:
                     execution.status = ExecutionStatus.SystemError
                     execution.end_time = datetime.datetime.utcnow()
                     execution._error_message = repr(ex)
-                    write_execution_to_db(execution)
+                    self._execution_db.update_execution(execution)
                     raise ExecutionFailedError(execution=execution) from ex
 
             container_launch_future = self._futures_executor.submit(
@@ -1046,6 +1035,62 @@ def _assert_type(value: typing.Any, typ: typing.Type[_T]) -> _T:
     return value
 
 
+class _ExecutionLogsStore:
+    def __init__(
+        self,
+        execution_logs_dir: storage_providers.UriAccessor,
+    ):
+        self._execution_logs_dir = execution_logs_dir
+
+    def generate_execution_log_uri(
+        self, execution_start_time: datetime.datetime
+    ) -> storage_providers.UriAccessor:
+        # Log ID = Execution ID. Mostly for human readability.
+        log_id = _ExecutionStore.generate_execution_id(execution_start_time)
+        # Should the log file have name "log.txt" or "data" like all artifacts?
+        return self._execution_logs_dir.make_subpath(relative_path=log_id).make_subpath(
+            relative_path="log.txt"
+        )
+
+
+class _ExecutionStore:
+    def __init__(
+        self,
+        executions_table_dir: storage_providers.UriAccessor,
+        artifact_storage_provider: storage_providers.StorageProvider,
+    ):
+        self._executions_table_dir = executions_table_dir
+        self._artifact_storage_provider = artifact_storage_provider
+
+    def get_execution(self, execution_id: str) -> ContainerExecution:
+        execution_uri = self._executions_table_dir.make_subpath(execution_id)
+        execution_data = execution_uri.get_reader().download_as_text()
+        execution_struct = json.loads(execution_data)
+        loaded_execution = ContainerExecution._from_dict(
+            execution_struct,
+            storage_provider=self._artifact_storage_provider,
+        )
+        loaded_execution._id = execution_id
+        return loaded_execution
+
+    @staticmethod
+    def generate_execution_id(start_time: datetime.datetime):
+        return start_time.strftime("%Y-%m-%d_%H-%M-%S_%f") + "_" + uuid.uuid4().hex
+
+    def create_execution(self, execution: ContainerExecution):
+        if not execution._id:
+            assert execution.start_time
+            execution._id = _ExecutionStore.generate_execution_id(execution.start_time)
+        self.update_execution(execution)
+
+    def update_execution(self, execution: ContainerExecution):
+        assert execution._id
+        execution_struct = execution._to_dict()
+        execution_string = json.dumps(execution_struct, indent=2)
+        execution_uri = self._executions_table_dir.make_subpath(execution._id)
+        execution_uri.get_writer().upload_from_text(execution_string)
+
+
 class _ExecutionCacheDb:
     OLDEST_EXECUTION_CACHE_SUB_KEY = "oldest"
     LATEST_EXECUTION_CACHE_SUB_KEY = "latest"
@@ -1058,9 +1103,9 @@ class _ExecutionCacheDb:
     def __init__(
         self,
         cached_execution_ids_table_dir: storage_providers.UriAccessor,
-        executions_table_dir: storage_providers.UriAccessor,
+        execution_db: _ExecutionStore,
     ):
-        self._executions_table_dir = executions_table_dir
+        self._execution_db = execution_db
         self._cached_execution_ids_table_dir = cached_execution_ids_table_dir
         self._running_executions_cache: Dict[str, List[ContainerExecution]] = {}
         # We could use one lock per execution_cache_key...
@@ -1078,15 +1123,7 @@ class _ExecutionCacheDb:
         if not execution_id_uri.get_reader().exists():
             return None
         execution_id = execution_id_uri.get_reader().download_as_text()
-        execution_uri = self._executions_table_dir.make_subpath(execution_id)
-        execution_data = execution_uri.get_reader().download_as_text()
-        execution_struct = json.loads(execution_data)
-        loaded_execution = ContainerExecution._from_dict(
-            execution_struct,
-            storage_provider=self._executions_table_dir._provider,
-        )
-        loaded_execution._id = execution_id
-        return loaded_execution
+        return self._execution_db.get_execution(execution_id)
 
     @staticmethod
     def get_execution_cache_key(
