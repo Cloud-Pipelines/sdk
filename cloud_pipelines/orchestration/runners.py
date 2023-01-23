@@ -142,45 +142,49 @@ class Runner:
                 path=data_path, type_spec=type_spec
             )
 
-    def _deduplicate_storage_artifact(
-        self, artifact: "_StorageArtifact"
+    def _create_artifact_from_uri(
+        self,
+        artifact_data_uri: storage_providers.UriAccessor,
+        execution: "ContainerExecution",
+        output_name: str,
+        type_spec: Optional[_structures.TypeSpecType],
     ) -> "_StorageArtifact":
-        data_info = artifact._artifact_data.info
-        data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
-        data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
-        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
-            relative_path=data_key
+        """Creates deduplicated artifact from a URI."""
+        artifact_data_struct = _ArtifactDataStruct.from_uri_reader(
+            artifact_data_uri.get_reader()
         )
+        data_hash = artifact_data_struct.info.hashes[_ARTIFACT_DATA_HASH]
+        artifact_data_info_id = f"{_ARTIFACT_DATA_HASH}={data_hash}"
+        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
+            relative_path=artifact_data_info_id
+        )
+        # Artifact data deduplication:
+        # Get existing artifact data info or add a new DB entry.
         with self._artifact_data_info_table_lock:
             if artifact_data_info_uri.get_reader().exists():
                 # Returning the artifact object that points to existing data
                 # We expect the DB to not be in corrupted state.
                 # We expect that the existing data with same hash is the same as the new data
-
-                artifact_data_info_struct = json.loads(
-                    artifact_data_info_uri.get_reader().download_as_text()
+                artifact_data_struct = _ArtifactDataStruct.from_dict(
+                    json.loads(artifact_data_info_uri.get_reader().download_as_text())
                 )
-                artifact_data = _ArtifactDataStruct.from_dict(artifact_data_info_struct)
-                existing_data_artifact = _StorageArtifact(
-                    artifact_data=artifact_data,
-                    storage_provider=self._artifact_data_dir._provider,
-                    type_spec=artifact._type_spec,
-                )
-                existing_data_artifact._artifact_data_id = data_key
-                existing_data_artifact._execution = artifact._execution
-                existing_data_artifact._execution_id = artifact._execution_id
-                existing_data_artifact._output_name = artifact._output_name
                 # TODO: ! Delete the new artifact data
-                return existing_data_artifact
             else:
                 # TODO: Rename the artifact to directory based on the data hash.
-                artifact_data_info_struct = artifact._artifact_data.to_dict()
-                artifact_data_info_str = json.dumps(artifact_data_info_struct, indent=2)
                 artifact_data_info_uri.get_writer().upload_from_text(
-                    artifact_data_info_str
+                    json.dumps(artifact_data_struct.to_dict(), indent=2)
                 )
-                artifact._artifact_data_id = data_key
-                return artifact
+
+        artifact = _StorageArtifact(
+            artifact_data=artifact_data_struct,
+            storage_provider=self._artifact_data_dir._provider,
+            type_spec=type_spec,
+        )
+        artifact._artifact_data_id = artifact_data_info_id
+        artifact._execution = execution
+        artifact._execution_id = execution._id
+        artifact._output_name = output_name
+        return artifact
 
     def _run_graph_task(
         self,
@@ -609,19 +613,11 @@ class Runner:
                         execution.status = ExecutionStatus.Succeeded
 
                         for output_name, output_uri in output_uris.items():
-                            artifact_data_struct = _ArtifactDataStruct.from_uri_reader(
-                                output_uri.get_reader()
-                            )
-                            output_artifact = _StorageArtifact(
-                                artifact_data=artifact_data_struct,
-                                storage_provider=output_uri._provider,
+                            output_artifact = self._create_artifact_from_uri(
+                                artifact_data_uri=output_uri,
+                                execution=execution,
+                                output_name=output_name,
                                 type_spec=output_specs[output_name].type,
-                            )
-                            output_artifact._execution = execution
-                            output_artifact._execution_id = execution._id
-                            output_artifact._output_name = output_name
-                            output_artifact = self._deduplicate_storage_artifact(
-                                artifact=output_artifact
                             )
                             output_artifacts[output_name] = output_artifact
                     else:
