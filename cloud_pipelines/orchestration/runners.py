@@ -63,31 +63,27 @@ class Runner:
         self._root_uri = root_uri
         self._on_log_entry_callback = on_log_entry_callback
         self._futures_executor = futures.ThreadPoolExecutor()
-        self._artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
-        self._execution_logs_dir = root_uri.make_subpath(relative_path="execution_logs")
-        self._db_dir = root_uri.make_subpath(relative_path="db")
-        self._artifact_data_info_table_dir = self._db_dir.make_subpath(
-            relative_path="artifact_data_info"
-        )
-        self._executions_table_dir = self._db_dir.make_subpath(
-            relative_path="container_executions"
-        )
-        self._cached_execution_ids_table_dir = self._db_dir.make_subpath(
-            relative_path="container_executions_cache"
-        )
+        artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
+        db_dir = root_uri.make_subpath(relative_path="db")
         self._artifact_store = _ArtifactStore(
-            artifact_data_dir=self._artifact_data_dir,
-            artifact_data_info_table_dir=self._artifact_data_info_table_dir,
+            artifact_data_dir=artifact_data_dir,
+            artifact_data_info_table_dir=db_dir.make_subpath(
+                relative_path="artifact_data_info"
+            ),
         )
         self._execution_db = _ExecutionStore(
-            executions_table_dir=self._executions_table_dir,
-            artifact_storage_provider=self._artifact_data_dir._provider,
+            executions_table_dir=db_dir.make_subpath(
+                relative_path="container_executions"
+            ),
+            artifact_storage_provider=artifact_data_dir._provider,
         )
         self._execution_logs_store = _ExecutionLogsStore(
-            execution_logs_dir=self._execution_logs_dir
+            execution_logs_dir=root_uri.make_subpath(relative_path="execution_logs")
         )
         self._execution_cache = _ExecutionCacheDb(
-            cached_execution_ids_table_dir=self._cached_execution_ids_table_dir,
+            cached_execution_ids_table_dir=db_dir.make_subpath(
+                relative_path="container_executions_cache"
+            ),
             execution_db=self._execution_db,
         )
 
