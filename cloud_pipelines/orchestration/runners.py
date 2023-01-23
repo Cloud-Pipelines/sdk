@@ -101,26 +101,27 @@ class Runner:
         data_info = local_storage._get_data_info_from_path(path=path)
         data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
         data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
-        uri_accessor = self._artifact_data_dir.make_subpath(
+        artifact_data_uri = self._artifact_data_dir.make_subpath(
             relative_path=data_key
         ).make_subpath(relative_path="data")
-        # TODO: Detect the existence by querying the artifact DB, not the data storage.
-        # This method is currently only invoked from the single main thread and thus does not synchronization issues.
-        # Protect the DB access with `self._artifact_data_info_table_lock` if called from multiple threads.
-        if not uri_accessor.get_reader().exists():
+        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
+            relative_path=data_key
+        )
+        # If the artifact data is not registered in the artifact data info DB, then we upload the data.
+        # We then use the existing `_create_artifact_from_uri` function to create the artifact.
+        if not artifact_data_info_uri.get_reader().exists():
             # TODO: Make uploading reliable. Upload to temporary location then rename.
-            uri_accessor.get_writer().upload_from_path(path=path)
-        else:
-            # Returning the artifact object that points to existing data
-            # We expect the DB to not be in corrupted state.
-            # We expect that the existing data with same hash is the same as the new data
-            pass
+            artifact_data_uri.get_writer().upload_from_path(path=path)
+            return self._create_artifact_from_uri(
+                artifact_data_uri=artifact_data_uri, type_spec=type_spec
+            )
 
+        # We could use the `_create_artifact_from_uri` function here as well,
+        # but we do not want to re-read the artifact data info from the DB as we already have it.
         artifact_data_struct = _ArtifactDataStruct(
-            uri=uri_accessor.uri,
+            uri=artifact_data_uri.uri,
             info=data_info,
         )
-        # TODO: Store the artifact_data_struct in the artifact_data DB table
         artifact = _StorageArtifact(
             artifact_data=artifact_data_struct,
             storage_provider=self._artifact_data_dir._provider,
@@ -145,9 +146,9 @@ class Runner:
     def _create_artifact_from_uri(
         self,
         artifact_data_uri: storage_providers.UriAccessor,
-        execution: "ContainerExecution",
-        output_name: str,
         type_spec: Optional[_structures.TypeSpecType],
+        execution: Optional["ContainerExecution"] = None,
+        output_name: Optional[str] = None,
     ) -> "_StorageArtifact":
         """Creates deduplicated artifact from a URI."""
         artifact_data_struct = _ArtifactDataStruct.from_uri_reader(
@@ -182,7 +183,7 @@ class Runner:
         )
         artifact._artifact_data_id = artifact_data_info_id
         artifact._execution = execution
-        artifact._execution_id = execution._id
+        artifact._execution_id = execution._id if execution else None
         artifact._output_name = output_name
         return artifact
 
