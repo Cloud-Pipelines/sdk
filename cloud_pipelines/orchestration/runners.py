@@ -66,11 +66,18 @@ class Runner:
         self._artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
         self._execution_logs_dir = root_uri.make_subpath(relative_path="execution_logs")
         self._db_dir = root_uri.make_subpath(relative_path="db")
+        self._artifact_data_info_table_dir = self._db_dir.make_subpath(
+            relative_path="artifact_data_info"
+        )
         self._executions_table_dir = self._db_dir.make_subpath(
             relative_path="container_executions"
         )
         self._cached_execution_ids_table_dir = self._db_dir.make_subpath(
             relative_path="container_executions_cache"
+        )
+        self._artifact_store = _ArtifactStore(
+            artifact_data_dir=self._artifact_data_dir,
+            artifact_data_info_table_dir=self._artifact_data_info_table_dir,
         )
         self._execution_db = _ExecutionStore(
             executions_table_dir=self._executions_table_dir,
@@ -83,109 +90,6 @@ class Runner:
             cached_execution_ids_table_dir=self._cached_execution_ids_table_dir,
             execution_db=self._execution_db,
         )
-        self._artifact_data_info_table_dir = self._db_dir.make_subpath(
-            relative_path="artifact_data_info"
-        )
-        self._artifact_data_info_table_lock = threading.Lock()
-
-    def _generate_artifact_data_uri(
-        self,
-    ) -> storage_providers.UriAccessor:
-        return self._artifact_data_dir.make_subpath(
-            relative_path="uuid=" + uuid.uuid4().hex
-        ).make_subpath(relative_path="data")
-
-    def _create_artifact_from_local_data(
-        self, path: str, type_spec: Optional[_structures.TypeSpecType]
-    ) -> "_StorageArtifact":
-        data_info = local_storage._get_data_info_from_path(path=path)
-        data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
-        data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
-        artifact_data_uri = self._artifact_data_dir.make_subpath(
-            relative_path=data_key
-        ).make_subpath(relative_path="data")
-        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
-            relative_path=data_key
-        )
-        # If the artifact data is not registered in the artifact data info DB, then we upload the data.
-        # We then use the existing `_create_artifact_from_uri` function to create the artifact.
-        if not artifact_data_info_uri.get_reader().exists():
-            # TODO: Make uploading reliable. Upload to temporary location then rename.
-            artifact_data_uri.get_writer().upload_from_path(path=path)
-            return self._create_artifact_from_uri(
-                artifact_data_uri=artifact_data_uri, type_spec=type_spec
-            )
-
-        # We could use the `_create_artifact_from_uri` function here as well,
-        # but we do not want to re-read the artifact data info from the DB as we already have it.
-        artifact_data_struct = _ArtifactDataStruct(
-            uri=artifact_data_uri.uri,
-            info=data_info,
-        )
-        artifact = _StorageArtifact(
-            artifact_data=artifact_data_struct,
-            storage_provider=self._artifact_data_dir._provider,
-            type_spec=type_spec,
-        )
-        artifact._artifact_data_id = data_key
-        return artifact
-
-    def _create_artifact_from_object(
-        self, obj: Any, type_spec: Optional[_structures.TypeSpecType]
-    ) -> "_StorageArtifact":
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # We could make the last path part anything, not just "data".
-            data_path = os.path.join(temp_dir, _ARTIFACT_PATH_LAST_PART)
-            type_spec = _serialization.save(
-                obj=obj, path=data_path, type_spec=type_spec
-            )
-            return self._create_artifact_from_local_data(
-                path=data_path, type_spec=type_spec
-            )
-
-    def _create_artifact_from_uri(
-        self,
-        artifact_data_uri: storage_providers.UriAccessor,
-        type_spec: Optional[_structures.TypeSpecType],
-        execution: Optional["ContainerExecution"] = None,
-        output_name: Optional[str] = None,
-    ) -> "_StorageArtifact":
-        """Creates deduplicated artifact from a URI."""
-        artifact_data_struct = _ArtifactDataStruct.from_uri_reader(
-            artifact_data_uri.get_reader()
-        )
-        data_hash = artifact_data_struct.info.hashes[_ARTIFACT_DATA_HASH]
-        artifact_data_info_id = f"{_ARTIFACT_DATA_HASH}={data_hash}"
-        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
-            relative_path=artifact_data_info_id
-        )
-        # Artifact data deduplication:
-        # Get existing artifact data info or add a new DB entry.
-        with self._artifact_data_info_table_lock:
-            if artifact_data_info_uri.get_reader().exists():
-                # Returning the artifact object that points to existing data
-                # We expect the DB to not be in corrupted state.
-                # We expect that the existing data with same hash is the same as the new data
-                artifact_data_struct = _ArtifactDataStruct.from_dict(
-                    json.loads(artifact_data_info_uri.get_reader().download_as_text())
-                )
-                # TODO: ! Delete the new artifact data
-            else:
-                # TODO: Rename the artifact to directory based on the data hash.
-                artifact_data_info_uri.get_writer().upload_from_text(
-                    json.dumps(artifact_data_struct.to_dict(), indent=2)
-                )
-
-        artifact = _StorageArtifact(
-            artifact_data=artifact_data_struct,
-            storage_provider=self._artifact_data_dir._provider,
-            type_spec=type_spec,
-        )
-        artifact._artifact_data_id = artifact_data_info_id
-        artifact._execution = execution
-        artifact._execution_id = execution._id if execution else None
-        artifact._output_name = output_name
-        return artifact
 
     def _run_graph_task(
         self,
@@ -427,7 +331,7 @@ class Runner:
             input_name: (
                 argument
                 if isinstance(argument, artifact_stores.Artifact)
-                else self._create_artifact_from_object(
+                else self._artifact_store.create_artifact_from_object(
                     obj=argument, type_spec=input_specs[input_name].type
                 )
             )
@@ -567,7 +471,7 @@ class Runner:
 
                     # Preparing artifacts, readers and writers
                     output_uris = {
-                        output_name: self._generate_artifact_data_uri()
+                        output_name: self._artifact_store.generate_artifact_data_uri()
                         for output_name in output_names
                     }
                     input_uri_readers = {
@@ -614,11 +518,13 @@ class Runner:
                         execution.status = ExecutionStatus.Succeeded
 
                         for output_name, output_uri in output_uris.items():
-                            output_artifact = self._create_artifact_from_uri(
-                                artifact_data_uri=output_uri,
-                                execution=execution,
-                                output_name=output_name,
-                                type_spec=output_specs[output_name].type,
+                            output_artifact = (
+                                self._artifact_store.create_artifact_from_uri(
+                                    artifact_data_uri=output_uri,
+                                    execution=execution,
+                                    output_name=output_name,
+                                    type_spec=output_specs[output_name].type,
+                                )
                             )
                             output_artifacts[output_name] = output_artifact
                     else:
@@ -1030,6 +936,116 @@ def _assert_type(value: typing.Any, typ: typing.Type[_T]) -> _T:
     if not isinstance(value, typ):
         raise TypeError(f"Expected type {typ}, but got {type(value)}: {value}")
     return value
+
+
+class _ArtifactStore:
+    def __init__(
+        self,
+        artifact_data_dir: storage_providers.UriAccessor,
+        artifact_data_info_table_dir: storage_providers.UriAccessor,
+    ):
+        self._artifact_data_dir = artifact_data_dir
+        self._artifact_data_info_table_dir = artifact_data_info_table_dir
+        self._artifact_data_info_table_lock = threading.Lock()
+
+    def generate_artifact_data_uri(
+        self,
+    ) -> storage_providers.UriAccessor:
+        return self._artifact_data_dir.make_subpath(
+            relative_path="uuid=" + uuid.uuid4().hex
+        ).make_subpath(relative_path="data")
+
+    def create_artifact_from_local_data(
+        self, path: str, type_spec: Optional[_structures.TypeSpecType]
+    ) -> "_StorageArtifact":
+        data_info = local_storage._get_data_info_from_path(path=path)
+        data_hash = data_info.hashes[_ARTIFACT_DATA_HASH]
+        data_key = f"{_ARTIFACT_DATA_HASH}={data_hash}"
+        artifact_data_uri = self._artifact_data_dir.make_subpath(
+            relative_path=data_key
+        ).make_subpath(relative_path="data")
+        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
+            relative_path=data_key
+        )
+        # If the artifact data is not registered in the artifact data info DB, then we upload the data.
+        # We then use the existing `create_artifact_from_uri` function to create the artifact.
+        if not artifact_data_info_uri.get_reader().exists():
+            # TODO: Make uploading reliable. Upload to temporary location then rename.
+            artifact_data_uri.get_writer().upload_from_path(path=path)
+            return self.create_artifact_from_uri(
+                artifact_data_uri=artifact_data_uri, type_spec=type_spec
+            )
+
+        # We could use the `create_artifact_from_uri` function here as well,
+        # but we do not want to re-read the artifact data info from the DB as we already have it.
+        artifact_data_struct = _ArtifactDataStruct(
+            uri=artifact_data_uri.uri,
+            info=data_info,
+        )
+        artifact = _StorageArtifact(
+            artifact_data=artifact_data_struct,
+            storage_provider=self._artifact_data_dir._provider,
+            type_spec=type_spec,
+        )
+        artifact._artifact_data_id = data_key
+        return artifact
+
+    def create_artifact_from_object(
+        self, obj: Any, type_spec: Optional[_structures.TypeSpecType]
+    ) -> "_StorageArtifact":
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # We could make the last path part anything, not just "data".
+            data_path = os.path.join(temp_dir, _ARTIFACT_PATH_LAST_PART)
+            type_spec = _serialization.save(
+                obj=obj, path=data_path, type_spec=type_spec
+            )
+            return self.create_artifact_from_local_data(
+                path=data_path, type_spec=type_spec
+            )
+
+    def create_artifact_from_uri(
+        self,
+        artifact_data_uri: storage_providers.UriAccessor,
+        type_spec: Optional[_structures.TypeSpecType],
+        execution: Optional["ContainerExecution"] = None,
+        output_name: Optional[str] = None,
+    ) -> "_StorageArtifact":
+        """Creates deduplicated artifact from a URI."""
+        artifact_data_struct = _ArtifactDataStruct.from_uri_reader(
+            artifact_data_uri.get_reader()
+        )
+        data_hash = artifact_data_struct.info.hashes[_ARTIFACT_DATA_HASH]
+        artifact_data_info_id = f"{_ARTIFACT_DATA_HASH}={data_hash}"
+        artifact_data_info_uri = self._artifact_data_info_table_dir.make_subpath(
+            relative_path=artifact_data_info_id
+        )
+        # Artifact data deduplication:
+        # Get existing artifact data info or add a new DB entry.
+        with self._artifact_data_info_table_lock:
+            if artifact_data_info_uri.get_reader().exists():
+                # Returning the artifact object that points to existing data
+                # We expect the DB to not be in corrupted state.
+                # We expect that the existing data with same hash is the same as the new data
+                artifact_data_struct = _ArtifactDataStruct.from_dict(
+                    json.loads(artifact_data_info_uri.get_reader().download_as_text())
+                )
+                # TODO: ! Delete the new artifact data
+            else:
+                # TODO: Rename the artifact to directory based on the data hash.
+                artifact_data_info_uri.get_writer().upload_from_text(
+                    json.dumps(artifact_data_struct.to_dict(), indent=2)
+                )
+
+        artifact = _StorageArtifact(
+            artifact_data=artifact_data_struct,
+            storage_provider=self._artifact_data_dir._provider,
+            type_spec=type_spec,
+        )
+        artifact._artifact_data_id = artifact_data_info_id
+        artifact._execution = execution
+        artifact._execution_id = execution._id if execution else None
+        artifact._output_name = output_name
+        return artifact
 
 
 class _ExecutionLogsStore:
