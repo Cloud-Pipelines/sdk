@@ -731,14 +731,16 @@ class ContainerExecution(Execution):
 
     def _to_dict(self) -> dict:
         input_arguments_struct = {
-            input_name: _assert_type(artifact, _StorageArtifact)._to_dict()
+            input_name: {
+                "artifact": _assert_type(artifact, _StorageArtifact)._to_dict()
+            }
             for input_name, artifact in self.input_arguments.items()
         }
         outputs_struct = {}
         for output_name, artifact in self.outputs.items():
             # Skipping artifacts that are not produced yet
             if isinstance(artifact, _StorageArtifact):
-                outputs_struct[output_name] = artifact._to_dict()
+                outputs_struct[output_name] = {"artifact": artifact._to_dict()}
         result = {
             # Execution
             "task_spec": self.task_spec.to_dict(),
@@ -763,13 +765,13 @@ class ContainerExecution(Execution):
             task_spec=structures.TaskSpec.from_dict(dict["task_spec"]),
             input_arguments={
                 input_name: _StorageArtifact._from_dict(
-                    dict=artifact_struct, provider=storage_provider
+                    dict=artifact_struct["artifact"], provider=storage_provider
                 )
                 for input_name, artifact_struct in dict["input_artifacts"].items()
             },
             outputs={
                 output_name: _StorageArtifact._from_dict(
-                    dict=artifact_struct, provider=storage_provider
+                    dict=artifact_struct["artifact"], provider=storage_provider
                 )
                 for output_name, artifact_struct in dict["output_artifacts"].items()
             },
