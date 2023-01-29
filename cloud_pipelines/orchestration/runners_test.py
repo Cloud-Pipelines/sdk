@@ -366,8 +366,8 @@ class LaunchersTestCase(unittest.TestCase):
             execution = runner.run_component(
                 component=fail,
             )
-        with self.assertRaises(runners.ExecutionFailedError):
-            execution.wait_for_completion()
+            with self.assertRaises(runners.ExecutionFailedError):
+                execution.wait_for_completion()
         assert isinstance(execution, runners.ContainerExecution)
         self.assertEqual(execution.status, runners.ExecutionStatus.Failed)
         self.assertIsNotNone(execution.start_time)
