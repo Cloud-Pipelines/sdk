@@ -1,3 +1,4 @@
+import abc
 from concurrent import futures
 import dataclasses
 import datetime
@@ -16,7 +17,6 @@ import uuid
 from .. import components
 from .._components.components import _structures
 from ..components import structures
-from . import artifact_stores
 from . import storage_providers
 from . import launchers
 from .launchers import naming_utils
@@ -111,7 +111,7 @@ class Runner:
         graph_spec: structures.GraphSpec = component_spec.implementation.graph
         toposorted_tasks = graph_spec._toposorted_tasks
 
-        graph_output_artifacts: Dict[str, artifact_stores.Artifact] = {}
+        graph_output_artifacts: Dict[str, "Artifact"] = {}
         task_executions = {}
         graph_execution = GraphExecution(
             task_spec=task_spec,
@@ -124,7 +124,7 @@ class Runner:
             # resolving task arguments
             task_input_artifacts = {}
             for input_name, argument in child_task_spec.arguments.items():
-                artifact: Optional[Union[str, artifact_stores.Artifact]]
+                artifact: Optional[Union[str, "Artifact"]]
                 if isinstance(argument, str):
                     # Not uploading the argument here. We'll do this it in _run_task.
                     # Artifact needs type and we do not know the input type yet since component is not loaded yet.
@@ -189,7 +189,7 @@ class Runner:
             structures.ComponentSpec,
             structures.ComponentReference,
         ],
-        arguments: Optional[Mapping[str, Union[str, artifact_stores.Artifact]]] = None,
+        arguments: Optional[Mapping[str, Union[str, "Artifact"]]] = None,
         annotations: Optional[Dict[str, Any]] = None,
         task_name: Optional[str] = None,
     ):
@@ -237,9 +237,7 @@ class Runner:
     def run_task(
         self,
         task_spec: structures.TaskSpec,
-        input_arguments: Optional[
-            Mapping[str, Union[str, artifact_stores.Artifact]]
-        ] = None,
+        input_arguments: Optional[Mapping[str, Union[str, "Artifact"]]] = None,
         task_name: Optional[str] = None,
     ) -> "Execution":
         for argument in (task_spec.arguments or {}).values():
@@ -328,7 +326,7 @@ class Runner:
         input_artifacts = {
             input_name: (
                 argument
-                if isinstance(argument, artifact_stores.Artifact)
+                if isinstance(argument, Artifact)
                 else self._artifact_store.create_artifact_from_object(
                     obj=argument, type_spec=input_specs[input_name].type
                 )
@@ -690,8 +688,8 @@ class Execution:
     def __init__(
         self,
         task_spec: structures.TaskSpec,
-        input_arguments: Mapping[str, artifact_stores.Artifact],
-        outputs: Mapping[str, artifact_stores.Artifact],
+        input_arguments: Mapping[str, "Artifact"],
+        outputs: Mapping[str, "Artifact"],
     ):
         self.task_spec = task_spec
         self.input_arguments = input_arguments
@@ -707,8 +705,8 @@ class ContainerExecution(Execution):
     def __init__(
         self,
         task_spec: structures.TaskSpec,
-        input_arguments: Mapping[str, artifact_stores.Artifact],
-        outputs: Mapping[str, artifact_stores.Artifact],
+        input_arguments: Mapping[str, "Artifact"],
+        outputs: Mapping[str, "Artifact"],
         status: ExecutionStatus = ExecutionStatus.Invalid,
     ):
         super().__init__(
@@ -805,8 +803,8 @@ class GraphExecution(Execution):
     def __init__(
         self,
         task_spec: structures.TaskSpec,
-        input_arguments: Mapping[str, artifact_stores.Artifact],
-        outputs: Mapping[str, artifact_stores.Artifact],
+        input_arguments: Mapping[str, "Artifact"],
+        outputs: Mapping[str, "Artifact"],
         task_executions: Mapping[str, Execution],
     ):
         super().__init__(
@@ -827,6 +825,36 @@ class UpstreamExecutionFailedError(Exception):
         self.execution = execution
         self.upstream_execution = upstream_execution
         super().__init__(self, execution, upstream_execution)
+
+
+class Artifact(abc.ABC):
+    def __init__(self, type_spec: Optional[_structures.TypeSpecType] = None):
+        self._type_spec = type_spec
+
+    def download(self, path: Optional[str] = None) -> str:
+        if not path:
+            temp_dir = tempfile.mkdtemp()
+            path = os.path.join(temp_dir, "data")
+        self._download_to_path(path=path)
+        return path
+
+    @abc.abstractmethod
+    def _download_to_path(self, path: str):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def _download_as_bytes(self) -> bytes:
+        raise NotImplementedError
+
+    def materialize(self):
+        if not self._type_spec:
+            raise ValueError("Cannot materialize artifact that has no type.")
+        path = self.download()
+        obj = _serialization.load(path=path, type_spec=self._type_spec)
+        return obj
+
+    def __repr__(self):
+        return f"Artifact(type_spec={self._type_spec})"
 
 
 class _ArtifactDataStruct:
@@ -856,7 +884,7 @@ class _ArtifactDataStruct:
         return _ArtifactDataStruct(uri=uri, info=info)
 
 
-class _StorageArtifact(artifact_stores.Artifact):
+class _StorageArtifact(Artifact):
     def __init__(
         self,
         artifact_data: _ArtifactDataStruct,
@@ -917,7 +945,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         return storage_artifact
 
 
-class _FutureExecutionOutputArtifact(artifact_stores.Artifact):
+class _FutureExecutionOutputArtifact(Artifact):
     def __init__(
         self,
         execution: Execution,
