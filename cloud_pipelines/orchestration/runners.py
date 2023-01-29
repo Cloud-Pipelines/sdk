@@ -19,6 +19,7 @@ from ..components import structures
 from . import artifact_stores
 from . import storage_providers
 from . import launchers
+from .launchers import naming_utils
 from .storage_providers import local_storage
 
 from ..components import _serialization
@@ -70,6 +71,7 @@ class Runner:
             artifact_data_info_table_dir=db_dir.make_subpath(
                 relative_path="artifact_data_info"
             ),
+            artifacts_table_dir=db_dir.make_subpath(relative_path="artifacts"),
         )
         self._execution_db = _ExecutionStore(
             executions_table_dir=db_dir.make_subpath(
@@ -732,7 +734,8 @@ class ContainerExecution(Execution):
     def _to_dict(self) -> dict:
         input_arguments_struct = {
             input_name: {
-                "artifact": _assert_type(artifact, _StorageArtifact)._to_dict()
+                "artifact_id": _assert_type(artifact, _StorageArtifact)._id,
+                "artifact": _assert_type(artifact, _StorageArtifact)._to_dict(),
             }
             for input_name, artifact in self.input_arguments.items()
         }
@@ -740,7 +743,10 @@ class ContainerExecution(Execution):
         for output_name, artifact in self.outputs.items():
             # Skipping artifacts that are not produced yet
             if isinstance(artifact, _StorageArtifact):
-                outputs_struct[output_name] = {"artifact": artifact._to_dict()}
+                outputs_struct[output_name] = {
+                    "artifact_id": artifact._id,
+                    "artifact": artifact._to_dict(),
+                }
         result = {
             # Execution
             "task_spec": self.task_spec.to_dict(),
@@ -765,13 +771,17 @@ class ContainerExecution(Execution):
             task_spec=structures.TaskSpec.from_dict(dict["task_spec"]),
             input_arguments={
                 input_name: _StorageArtifact._from_dict(
-                    dict=artifact_struct["artifact"], provider=storage_provider
+                    dict=artifact_struct["artifact"],
+                    provider=storage_provider,
+                    id=artifact_struct["artifact_id"],
                 )
                 for input_name, artifact_struct in dict["input_artifacts"].items()
             },
             outputs={
                 output_name: _StorageArtifact._from_dict(
-                    dict=artifact_struct["artifact"], provider=storage_provider
+                    dict=artifact_struct["artifact"],
+                    provider=storage_provider,
+                    id=artifact_struct["artifact_id"],
                 )
                 for output_name, artifact_struct in dict["output_artifacts"].items()
             },
@@ -858,6 +868,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         self._uri_reader = storage_providers.UriAccessor(
             uri=artifact_data.uri, provider=storage_provider
         ).get_reader()
+        self._id: Optional[str] = None
         self._artifact_data_id: Optional[str] = None
         self._execution: Optional[ContainerExecution] = None
         self._execution_id: Optional[str] = None
@@ -888,7 +899,9 @@ class _StorageArtifact(artifact_stores.Artifact):
 
     @staticmethod
     def _from_dict(
-        dict: dict, provider: storage_providers.StorageProvider
+        dict: dict,
+        provider: storage_providers.StorageProvider,
+        id: Optional[str] = None,
     ) -> "_StorageArtifact":
         artifact_data_dict = dict["artifact_data"]
         artifact_data = _ArtifactDataStruct.from_dict(artifact_data_dict)
@@ -900,6 +913,7 @@ class _StorageArtifact(artifact_stores.Artifact):
         storage_artifact._execution_id = dict.get("execution_id")
         storage_artifact._output_name = dict.get("output_name")
         # The `_execution` attribute is not populated. It can be populated lazily.
+        storage_artifact._id = id
         return storage_artifact
 
 
@@ -941,9 +955,11 @@ class _ArtifactStore:
         self,
         artifact_data_dir: storage_providers.UriAccessor,
         artifact_data_info_table_dir: storage_providers.UriAccessor,
+        artifacts_table_dir: storage_providers.UriAccessor,
     ):
         self._artifact_data_dir = artifact_data_dir
         self._artifact_data_info_table_dir = artifact_data_info_table_dir
+        self._artifact_table_dir = artifacts_table_dir
         self._artifact_data_info_table_lock = threading.Lock()
 
     def generate_artifact_data_uri(
@@ -986,6 +1002,7 @@ class _ArtifactStore:
             type_spec=type_spec,
         )
         artifact._artifact_data_id = data_key
+        # Fix: The reused constant artifact data objects do not get `artifact._id`
         return artifact
 
     def create_artifact_from_object(
@@ -1043,6 +1060,40 @@ class _ArtifactStore:
         artifact._execution = execution
         artifact._execution_id = execution._id if execution else None
         artifact._output_name = output_name
+        self._add_artifact_to_store(artifact)
+        return artifact
+
+    def _add_artifact_to_store(self, artifact: _StorageArtifact):
+        artifact_dict = artifact._to_dict()
+        artifact_str = json.dumps(artifact_dict, indent=2)
+        if artifact._execution_id and artifact._output_name:
+            # TODO: Maybe do more to ensure the `artifact_id`` uniqueness
+            artifact_id = (
+                artifact._execution_id
+                + "_"
+                + naming_utils.sanitize_file_name(artifact._output_name)
+            )
+        else:
+            # artifact_id = "uuid=" + uuid.uuid4().hex
+            artifact_id = hashlib.sha256(artifact_str.encode("utf-8")).hexdigest()
+            if artifact._artifact_data_id:
+                artifact_id = artifact._artifact_data_id + "_" + artifact_id
+
+        self._artifact_table_dir.make_subpath(
+            artifact_id
+        ).get_writer().upload_from_text(artifact_str)
+        artifact._id = artifact_id
+
+    def get_artifact(self, artifact_id: str) -> _StorageArtifact:
+        artifact_dict = json.loads(
+            self._artifact_table_dir.make_subpath(artifact_id)
+            .get_reader()
+            .download_as_text()
+        )
+        artifact = _StorageArtifact._from_dict(
+            dict=artifact_dict, provider=self._artifact_data_dir._provider
+        )
+        artifact._id = artifact_id
         return artifact
 
 
