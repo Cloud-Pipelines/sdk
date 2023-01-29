@@ -1306,7 +1306,7 @@ class _ExecutionCacheDb:
                 )
             )
             if period_cached_execution and (
-                period_cached_execution.end_time + max_cached_data_staleness
+                period_cached_execution.start_time + max_cached_data_staleness
                 >= current_time
             ):
                 # Reuse period_cached_execution
@@ -1320,7 +1320,7 @@ class _ExecutionCacheDb:
                 )
             )
             if latest_cached_execution and (
-                latest_cached_execution.end_time + max_cached_data_staleness
+                latest_cached_execution.start_time + max_cached_data_staleness
                 >= current_time
             ):
                 # Setting the period-based execution pointer to the latest execution that we reuse.
