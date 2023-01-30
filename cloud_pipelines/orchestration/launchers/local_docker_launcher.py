@@ -148,7 +148,9 @@ class DockerContainerLauncher(interfaces.ContainerTaskLauncher):
                 for output_name in output_names:
                     output_host_path = host_output_paths_map[output_name]
                     output_uri_writer = output_uri_writers[output_name]
-                    output_uri_writer.upload_from_path(output_host_path)
+                    # Do not fail on non-existing outputs here. It will be caught by the `Runner` class.
+                    if os.path.exists(output_host_path):
+                        output_uri_writer.upload_from_path(output_host_path)
 
             def clean_up():
                 container.remove()

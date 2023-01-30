@@ -910,6 +910,32 @@ class LaunchersTestCase(unittest.TestCase):
                 assert "stdout:Hello world" in log_text
                 assert "stderr:Hello world" in log_text
 
+    def test_failure_when_output_artifact_is_missing(self):
+        @components.create_component_from_func
+        def maybe_create_output(
+            output_path: components.OutputPath(),
+            text="Hello",
+            create_output: bool = False,
+        ):
+            if create_output:
+                with open(output_path, "w") as file:
+                    file.write(text)
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            runner = runners.Runner(
+                task_launcher=LocalEnvironmentLauncher(),
+                root_uri=local_storage.LocalStorageProvider().make_uri(path=output_dir),
+            )
+            execution = runner.run_component(
+                component=maybe_create_output,
+            )
+            with self.assertRaises(runners.ExecutionFailedError):
+                execution.wait_for_completion()
+
+        assert isinstance(execution, runners.ContainerExecution)
+        self.assertEqual(execution.status, runners.ExecutionStatus.Failed)
+        self.assertEqual(execution.exit_code, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

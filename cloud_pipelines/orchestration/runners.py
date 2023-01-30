@@ -511,8 +511,22 @@ class Runner:
                     execution.exit_code = container_execution_result.exit_code
                     execution.log = container_execution_result.log
                     if container_execution_result.exit_code == 0:
-                        execution.status = ExecutionStatus.Succeeded
+                        missing_output_names = [
+                            output_name
+                            for output_name, output_uri in output_uris.items()
+                            if not output_uri.get_reader().exists()
+                        ]
+                        if missing_output_names:
+                            log_message(
+                                message=f"Container task completed with exit code 0, but has missing outputs: {missing_output_names}"
+                            )
+                            execution.status = ExecutionStatus.Failed
+                        else:
+                            execution.status = ExecutionStatus.Succeeded
+                    else:
+                        execution.status = ExecutionStatus.Failed
 
+                    if execution.status == ExecutionStatus.Succeeded:
                         for output_name, output_uri in output_uris.items():
                             output_artifact = (
                                 self._artifact_store.create_artifact_from_uri(
@@ -523,8 +537,8 @@ class Runner:
                                 )
                             )
                             output_artifacts[output_name] = output_artifact
-                    else:
-                        execution.status = ExecutionStatus.Failed
+                    # TODO: Delete output artifacts when the execution fails.
+
                     log_message(
                         message=f"Container task completed with status: {execution.status.name}"
                     )
