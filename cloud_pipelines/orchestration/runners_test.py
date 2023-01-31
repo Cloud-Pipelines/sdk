@@ -343,6 +343,35 @@ class LaunchersTestCase(unittest.TestCase):
         )
         execution.wait_for_completion()
 
+    @unittest.skipIf(
+        condition=_GOOGLE_CLOUD_STORAGE_ROOT_URI is None,
+        reason="Root GCS URI is not set",
+    )
+    def test_google_vertex_custom_job_launcher(self):
+        if not _GOOGLE_CLOUD_STORAGE_ROOT_URI:
+            self.skipTest(reason="Root GCS URI is not set")
+            return
+
+        from cloud_pipelines.orchestration.launchers.google_cloud_vertex_custom_job_launcher import (
+            GoogleCloudVertexAiCustomJobLauncher,
+        )
+        from cloud_pipelines.orchestration.storage_providers.google_cloud_storage import (
+            GoogleCloudStorageProvider,
+        )
+
+        component = _build_data_passing_graph_component()
+
+        runner = runners.Runner(
+            task_launcher=GoogleCloudVertexAiCustomJobLauncher(),
+            root_uri=GoogleCloudStorageProvider().make_uri(
+                uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI
+            ),
+        )
+        execution = runner.run_component(
+            component=component,
+        )
+        execution.wait_for_completion()
+
     def test_interactive_mode_activate(self):
         # Disabling the interactive mode on exception to not affect other tests
         try:
