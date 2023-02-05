@@ -210,7 +210,6 @@ class _LaunchedDockerContainer(interfaces.LaunchedContainer):
             if on_log_entry_callback:
                 on_log_entry_callback(log_entry)
             log.add_entry(log_entry)
-            b''.decode()
             text_log_chunks.append(
                 log_entry_time.isoformat(sep=" ", timespec="seconds")
                 + "\t"
