@@ -236,14 +236,14 @@ def write_text_to_stdout_and_stderr(text="Hello world"):
 def create_local_runner(root_dir: str):
     return runners.Runner(
         task_launcher=LocalEnvironmentLauncher(),
-        root_uri=local_storage.LocalStorageProvider().make_uri(path=root_dir),
+        root_uri=root_dir,
     )
 
 
 def create_local_interactive_mode(root_dir: str):
     return runners.InteractiveMode(
         task_launcher=LocalEnvironmentLauncher(),
-        root_uri=local_storage.LocalStorageProvider().make_uri(path=root_dir),
+        root_uri=root_dir,
     )
 
 
@@ -260,7 +260,7 @@ class LaunchersTestCase(unittest.TestCase):
 
         runner = runners.Runner(
             task_launcher=LocalEnvironmentLauncher(),
-            root_uri=local_storage.LocalStorageProvider().make_uri(path=self._temp_dir),
+            root_uri=self._temp_dir,
         )
         execution = runner.run_task(
             task_spec=pipeline_task,
@@ -279,7 +279,7 @@ class LaunchersTestCase(unittest.TestCase):
 
         runner = runners.Runner(
             task_launcher=DockerContainerLauncher(),
-            root_uri=local_storage.LocalStorageProvider().make_uri(path=self._temp_dir),
+            root_uri=self._temp_dir,
         )
         execution = runner.run_component(
             component=component,
@@ -299,7 +299,7 @@ class LaunchersTestCase(unittest.TestCase):
 
         runner = runners.Runner(
             task_launcher=LocalKubernetesContainerLauncher(),
-            root_uri=local_storage.LocalStorageProvider().make_uri(path=self._temp_dir),
+            root_uri=self._temp_dir,
         )
         execution = runner.run_component(
             component=component,
@@ -334,9 +334,7 @@ class LaunchersTestCase(unittest.TestCase):
 
         runner = runners.Runner(
             task_launcher=GoogleCloudBatchLauncher(),
-            root_uri=GoogleCloudStorageProvider().make_uri(
-                uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI
-            ),
+            root_uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI,
         )
         execution = runner.run_component(
             component=component,
@@ -363,9 +361,7 @@ class LaunchersTestCase(unittest.TestCase):
 
         runner = runners.Runner(
             task_launcher=GoogleCloudVertexAiCustomJobLauncher(),
-            root_uri=GoogleCloudStorageProvider().make_uri(
-                uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI
-            ),
+            root_uri=_GOOGLE_CLOUD_STORAGE_ROOT_URI,
         )
         execution = runner.run_component(
             component=component,
@@ -377,9 +373,7 @@ class LaunchersTestCase(unittest.TestCase):
         try:
             runners.InteractiveMode.activate(
                 task_launcher=LocalEnvironmentLauncher(),
-                root_uri=local_storage.LocalStorageProvider().make_uri(
-                    path=self._temp_dir
-                ),
+                root_uri=self._temp_dir,
             )
 
             data1 = produce_value().outputs["Output"]
@@ -870,7 +864,7 @@ class LaunchersTestCase(unittest.TestCase):
     def test_container_execution_log_artifact_when_failing(self):
         with runners.InteractiveMode(
             task_launcher=LocalEnvironmentLauncher(),
-            root_uri=local_storage.LocalStorageProvider().make_uri(path=self._temp_dir),
+            root_uri=self._temp_dir,
             # Preventing the context from raising ExecutionFailedError
             # Adding an outer with `self.assertRaises(runners.ExecutionFailedError)`
             # does not work since for some reason it catches all errors.

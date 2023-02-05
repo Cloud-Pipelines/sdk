@@ -55,17 +55,17 @@ class Runner:
     def __init__(
         self,
         task_launcher: launchers.ContainerTaskLauncher,
-        root_uri: storage_providers.UriAccessor,
+        root_uri: str,  # Maybe `Union[str, storage_providers.UriAccessor]` ?
         on_log_entry_callback: Optional[
             Callable[[launchers.ProcessLogEntry], None]
         ] = _default_log_printer,
     ):
         self._task_launcher = task_launcher
-        self._root_uri = root_uri
+        self._root_uri = storage_providers.make_uri_accessor_from_uri(root_uri)
         self._on_log_entry_callback = on_log_entry_callback
         self._futures_executor = futures.ThreadPoolExecutor()
-        artifact_data_dir = root_uri.make_subpath(relative_path="artifact_data")
-        db_dir = root_uri.make_subpath(relative_path="db")
+        artifact_data_dir = self._root_uri.make_subpath(relative_path="artifact_data")
+        db_dir = self._root_uri.make_subpath(relative_path="db")
         self._artifact_store = _ArtifactStore(
             artifact_data_dir=artifact_data_dir,
             artifact_data_info_table_dir=db_dir.make_subpath(
@@ -80,7 +80,9 @@ class Runner:
             artifact_storage_provider=artifact_data_dir._provider,
         )
         self._execution_logs_store = _ExecutionLogsStore(
-            execution_logs_dir=root_uri.make_subpath(relative_path="execution_logs")
+            execution_logs_dir=self._root_uri.make_subpath(
+                relative_path="execution_logs"
+            )
         )
         self._execution_cache = _ExecutionCacheDb(
             cached_execution_ids_table_dir=db_dir.make_subpath(
@@ -584,7 +586,7 @@ class InteractiveMode:
     def __init__(
         self,
         task_launcher: Optional[launchers.ContainerTaskLauncher] = None,
-        root_uri: Optional[storage_providers.UriAccessor] = None,
+        root_uri: Optional[str] = None,
         wait_for_completion_on_exit: bool = True,
     ):
         if not task_launcher:
@@ -592,12 +594,11 @@ class InteractiveMode:
 
             task_launcher = DockerContainerLauncher()
         if not root_uri:
-            from .storage_providers import local_storage
             import tempfile
 
             root_dir = tempfile.mkdtemp(prefix="cloud_pipelines.")
 
-            root_uri = local_storage.LocalStorageProvider().make_uri(root_dir)
+            root_uri = root_dir
         self._runner = Runner(
             task_launcher=task_launcher,
             root_uri=root_uri,
@@ -647,7 +648,7 @@ class InteractiveMode:
     @staticmethod
     def activate(
         task_launcher: Optional[launchers.ContainerTaskLauncher] = None,
-        root_uri: Optional[storage_providers.UriAccessor] = None,
+        root_uri: Optional[str] = None,
         wait_for_completion_on_exit: bool = True,
     ):
         if InteractiveMode._interactive_mode:
