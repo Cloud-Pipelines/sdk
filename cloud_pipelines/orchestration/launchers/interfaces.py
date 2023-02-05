@@ -16,6 +16,7 @@ class ContainerTaskLauncher(abc.ABC):
         task_spec: structures.TaskSpec,
         input_uri_readers: Mapping[str, storage_providers.UriReader],
         output_uri_writers: Mapping[str, storage_providers.UriWriter],
+        log_uri_writer: storage_providers.UriWriter,
     ) -> "LaunchedContainer":
         raise NotImplementedError
 
