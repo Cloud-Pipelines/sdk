@@ -111,6 +111,20 @@ def _deserialize_json_object(string: str) -> dict:
     return obj
 
 
+def _save_pickle(obj, path: str):
+    import pickle
+
+    with open(path, "wb") as file:
+        pickle.dump(obj=obj, file=file)
+
+
+def _load_pickle(path: str) -> Any:
+    import pickle
+
+    with open(path, "rb") as file:
+        return pickle.load(file=file)
+
+
 _serializers = {}
 # TODO: Attach type specs to the serializers
 _serializers[str] = _serialize_str  # String
@@ -133,6 +147,10 @@ SAVER_TYPE = Callable[[Any, str], None]
 LOADER_TYPE = Callable[[str], Any]
 savers: Dict[str, SAVER_TYPE] = {}
 loaders: Dict[str, LOADER_TYPE] = {}
+
+savers["PythonPickle"] = _save_pickle
+loaders["PythonPickle"] = _load_pickle
+
 
 _python_type_mappers = []
 # Converting generic type aliases: typing.List -> list, typing.Dict -> dict
@@ -162,6 +180,8 @@ python_type_name_to_type_spec["float"] = "Float"
 python_type_name_to_type_spec["bool"] = "Boolean"
 python_type_name_to_type_spec["list"] = "JsonArray"
 python_type_name_to_type_spec["dict"] = "JsonObject"
+
+python_type_name_to_type_spec["object"] = "PythonPickle"
 
 
 from . import _serializers_ml
