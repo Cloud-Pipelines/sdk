@@ -42,8 +42,26 @@ def load_from_TensorflowSavedModel(path: str):
         return tensorflow.saved_model.load(export_dir=path)
 
 
+def save_as_PyTorchScriptModule(obj, path: str):
+    from torch import jit
+
+    jit.script(obj).save(path)
+
+
+def load_from_PyTorchScriptModule(path: str):
+    from torch import jit
+
+    return jit.load(path)
+
+
 _serializers.python_type_name_to_type_spec[
     "tensorflow.python.training.tracking.base.Trackable"
 ] = "TensorflowSavedModel"
 _serializers.savers["TensorflowSavedModel"] = save_as_TensorflowSavedModel
 _serializers.loaders["TensorflowSavedModel"] = load_from_TensorflowSavedModel
+
+_serializers.python_type_name_to_type_spec[
+    "torch.nn.modules.module.Module"
+] = "PyTorchScriptModule"
+_serializers.savers["PyTorchScriptModule"] = save_as_PyTorchScriptModule
+_serializers.loaders["PyTorchScriptModule"] = load_from_PyTorchScriptModule

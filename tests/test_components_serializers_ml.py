@@ -74,6 +74,39 @@ class ComponentsSerializersMLTestCase(unittest.TestCase):
             predictions = output_model(tf.constant([[0.1, 0.2, 0.3]]))
             assert predictions.shape == (1, 5)
 
+    def test_PyTorchScriptModule(self):
+        def transform_torch_model(
+            model_path: InputPath("PyTorchScriptModule"),
+            output_model_path: OutputPath("PyTorchScriptModule"),
+        ):
+            import torch.jit
+
+            model = torch.jit.load(model_path)
+            print(model)
+            torch.jit.script(model).save(output_model_path)
+
+        transform_torch_model_op = create_component_from_func(
+            func=transform_torch_model,
+            base_image="pytorch/pytorch:1.12.1-cuda11.3-cudnn8-runtime",
+        )
+
+        import torch
+        import torch.nn
+
+        with runners.InteractiveMode():
+            input_model = torch.nn.Sequential(
+                torch.nn.Linear(in_features=3, out_features=5), torch.nn.Softmax()
+            )
+            output_art = transform_torch_model_op(model=input_model).outputs[
+                "output_model"
+            ]
+
+            output_model = output_art.materialize()
+            assert output_model
+        predictions = output_model(torch.Tensor([[0.1, 0.2, 0.3]]))
+        assert predictions.shape == (1, 5)
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
