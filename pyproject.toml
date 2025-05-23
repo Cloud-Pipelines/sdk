@@ -1,3 +1,54 @@
+[project]
+name = "cloud-pipelines"
+version = "0.23.02.04"
+description = "SDK for Cloud Pipelines"
+authors = [
+    {name = "Alexey Volkov", email = "alexey.volkov@ark-kun.com"},
+]
+license = {text = "Apache License 2.0"}
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "PyYAML",
+    "docker >=4.4.0, <7.0.0",
+    "docstring-parser",
+    "isodate ~= 0.6.1",
+    "requests",
+    "strip-hints >= 0.1.8",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+homepage = "https://cloud-pipelines.net"
+source = "https://github.com/Cloud-Pipelines/sdk"
+issues = "https://github.com/Cloud-Pipelines/sdk/issues"
+
+[project.optional-dependencies]
+tests = [
+    "mock",
+]
+
+[tool.setuptools.packages.find]
+include = ["cloud_pipelines*", "pipelines*"]
+exclude = ["*tests*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*tests*"]
+
 [build-system]
 requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
