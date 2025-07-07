@@ -657,7 +657,7 @@ def create_component_from_func(
     *,
     output_component_file: Optional[str] = None,
     base_image: Optional[str] = None,
-    packages_to_install: Optional[list[str]] = None,
+    packages_to_install: Optional[List[str]] = None,
     annotations: Optional[Dict[str, str]] = None,
 ):
     """Converts a Python function to a component and returns a task factory
