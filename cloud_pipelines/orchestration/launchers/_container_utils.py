@@ -123,11 +123,8 @@ def _resolve_command_line_and_paths(
         elif isinstance(arg, structures.IfPlaceholder):
             arg = arg.if_structure
             condition_result = expand_command_part(arg.condition)
-            from distutils.util import strtobool
-
-            condition_result_bool = condition_result and strtobool(
-                condition_result
-            )  # Python gotcha: bool('False') == True; Need to use strtobool; Also need to handle None and []
+            # Python gotcha: `bool("False") == True`. So we need to use `_deserialize_boolean`.
+            condition_result_bool = _deserialize_boolean(condition_result)
             result_node = arg.then_value if condition_result_bool else arg.else_value
             if result_node is None:
                 return []
@@ -165,3 +162,13 @@ def _resolve_command_line_and_paths(
         output_paths=output_paths,
         inputs_consumed_by_value=inputs_consumed_by_value,
     )
+
+
+def _deserialize_boolean(string: str) -> bool:
+    string = string.lower()
+    if string == "true":
+        return True
+    elif string == "false":
+        return False
+    else:
+        raise ValueError(f"Invalid serialized boolean value: {string}")
