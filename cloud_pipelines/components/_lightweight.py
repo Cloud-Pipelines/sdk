@@ -7,9 +7,10 @@ import docstring_parser
 
 from . import structures
 from .._components.components import _components as _internal_components_module
+from .._components.components import _data_passing as _internal_serialization
 from .._components.components._data_passing import (
     serialize_value,
-    get_deserializer_code_for_type_struct,
+    # get_deserializer_code_for_type_struct, # Patched
     get_serializer_func_for_type_struct,
     get_canonical_type_struct_for_type,
 )
@@ -415,7 +416,7 @@ def _create_component_spec_from_func(
     definitions = set()
 
     def get_deserializer_and_register_definitions(type_name):
-        deserializer_code = get_deserializer_code_for_type_struct(type_name)
+        deserializer_code = _get_deserializer_code_for_type_struct(type_name)
         if deserializer_code:
             (deserializer_code_str, definition_str) = deserializer_code
             if definition_str:
@@ -792,3 +793,26 @@ def _module_is_builtin_or_standard(module_name: str) -> bool:
     except:
         pass
     return False
+
+
+# Patching the boolean deserialization.
+# TODO: Unfreeze the serialization module and apply the patch.
+def _deserialize_bool(s):
+    s = s.lower()
+    if s == "true":
+        return True
+    if s == "false":
+        return False
+    raise TypeError(
+        f'Error parsing "{s}" as bool value. Supported values: "true", "false".'
+    )
+
+
+_bool_deserializer_definitions = inspect.getsource(_deserialize_bool)
+_bool_deserializer_code = _deserialize_bool.__name__
+
+
+def _get_deserializer_code_for_type_struct(type_struct: str):
+    if type_struct == "Boolean":
+        return (_bool_deserializer_code, _bool_deserializer_definitions)
+    return _internal_serialization.get_deserializer_code_for_type_struct(type_struct)
