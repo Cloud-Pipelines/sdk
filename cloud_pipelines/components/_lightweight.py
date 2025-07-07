@@ -773,12 +773,22 @@ def _module_is_builtin_or_standard(module_name: str) -> bool:
 
     if module_name in sys.builtin_module_names:
         return True
-    import distutils.sysconfig as sysconfig
-    import os
 
-    std_lib_dir = sysconfig.get_python_lib(standard_lib=True)
-    module_name_parts = module_name.split(".")
-    expected_module_path = os.path.join(std_lib_dir, *module_name_parts)
-    return os.path.exists(expected_module_path) or os.path.exists(
-        expected_module_path + ".py"
-    )
+    try:
+        return module_name in sys.stdlib_module_names
+    except:
+        pass
+
+    try:
+        from distutils import sysconfig
+        import os
+
+        std_lib_dir = sysconfig.get_python_lib(standard_lib=True)
+        module_name_parts = module_name.split(".")
+        expected_module_path = os.path.join(std_lib_dir, *module_name_parts)
+        return os.path.exists(expected_module_path) or os.path.exists(
+            expected_module_path + ".py"
+        )
+    except:
+        pass
+    return False
