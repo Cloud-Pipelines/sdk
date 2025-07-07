@@ -7,10 +7,10 @@ from typing import Callable, Mapping, Optional
 
 
 from ...components import structures
-from ..._components.components._components import _resolve_command_line_and_paths
 from .. import storage_providers
 from ..storage_providers import google_cloud_storage
 from . import interfaces
+from ._container_utils import _resolve_command_line_and_paths
 
 
 from google.cloud import aiplatform

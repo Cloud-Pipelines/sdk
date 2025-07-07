@@ -16,24 +16,24 @@ from cloud_pipelines.components._lightweight import (
     OutputBinaryFile,
 )
 from cloud_pipelines.components import structures
-from cloud_pipelines._components.components import _components as _internal_components
+from cloud_pipelines.orchestration.launchers import _container_utils
 
 
 @contextmanager
 def components_override_input_output_dirs_context(
     inputs_dir: Optional[str] = None, outputs_dir: Optional[str] = None
 ):
-    old_inputs_dir = _internal_components._inputs_dir
-    old_outputs_dir = _internal_components._outputs_dir
+    old_inputs_dir = _container_utils._inputs_dir
+    old_outputs_dir = _container_utils._outputs_dir
     try:
         if inputs_dir:
-            _internal_components._inputs_dir = inputs_dir
+            _container_utils._inputs_dir = inputs_dir
         if outputs_dir:
-            _internal_components._outputs_dir = outputs_dir
+            _container_utils._outputs_dir = outputs_dir
         yield
     finally:
-        _internal_components._inputs_dir = old_inputs_dir
-        _internal_components._outputs_dir = old_outputs_dir
+        _container_utils._inputs_dir = old_inputs_dir
+        _container_utils._outputs_dir = old_outputs_dir
 
 
 def _component_test_func_in_0_out_0():
@@ -59,7 +59,7 @@ class PythonOpTestCase(unittest.TestCase):
                 outputs_dir=temp_dir_name
             ):
                 task = op(arguments[0], arguments[1])
-                resolved_cmd = _internal_components._resolve_command_line_and_paths(
+                resolved_cmd = _container_utils._resolve_command_line_and_paths(
                     task.component_ref.spec,
                     task.arguments,
                 )
@@ -95,7 +95,7 @@ class PythonOpTestCase(unittest.TestCase):
                 outputs_dir=temp_dir_name
             ):
                 task = op(arg1, arg2)
-                resolved_cmd = _internal_components._resolve_command_line_and_paths(
+                resolved_cmd = _container_utils._resolve_command_line_and_paths(
                     task.component_ref.spec,
                     task.arguments,
                 )
@@ -171,7 +171,7 @@ class PythonOpTestCase(unittest.TestCase):
                 str(inputs_path), str(outputs_path)
             ):
                 task = component_task_factory(**arguments)
-                resolved_cmd = _internal_components._resolve_command_line_and_paths(
+                resolved_cmd = _container_utils._resolve_command_line_and_paths(
                     task.component_ref.spec,
                     task.arguments,
                 )

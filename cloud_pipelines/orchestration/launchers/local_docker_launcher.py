@@ -10,10 +10,9 @@ import docker
 from docker.models.containers import Container
 
 from ...components import structures
-from ..._components.components._components import _resolve_command_line_and_paths
-
 from .. import storage_providers
 from . import interfaces
+from ._container_utils import _resolve_command_line_and_paths
 from .naming_utils import sanitize_file_name
 
 

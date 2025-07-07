@@ -12,10 +12,9 @@ from kubernetes import client as k8s_client
 from kubernetes import watch as k8s_watch
 
 from ...components import structures
-from ..._components.components._components import _resolve_command_line_and_paths
-
 from .. import storage_providers
 from . import interfaces
+from ._container_utils import _resolve_command_line_and_paths
 from .kubernetes_utils import (
     wait_for_pod_to_stop_pending,
     wait_for_pod_to_succeed_or_fail,
