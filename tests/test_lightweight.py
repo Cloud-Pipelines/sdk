@@ -1,3 +1,4 @@
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -70,11 +71,13 @@ class PythonOpTestCase(unittest.TestCase):
             # Setting the component python interpreter to the current one.
             # Otherwise the components are executed in different environment.
             # Some components (e.g. the ones that use code pickling) are sensitive to this.
-            for i in range(2):
-                if full_command[i] == "python3":
-                    full_command[i] = sys.executable
+            for i in range(5):
+                if "python3" in full_command[i]:
+                    # Lightweight components use Shell to call Python. So we convert the path to POSIX.
+                    # The simple, but less robust alternative is: `python_path = "python"`
+                    python_path = pathlib.Path(sys.executable).as_posix()
+                    full_command[i] = full_command[i].replace("python3", python_path)
                     break
-
             subprocess.run(full_command, check=True)
 
             output_path = list(resolved_cmd.output_paths.values())[0]
@@ -106,9 +109,12 @@ class PythonOpTestCase(unittest.TestCase):
             # Setting the component python interpreter to the current one.
             # Otherwise the components are executed in different environment.
             # Some components (e.g. the ones that use code pickling) are sensitive to this.
-            for i in range(2):
-                if full_command[i] == "python3":
-                    full_command[i] = sys.executable
+            for i in range(5):
+                if "python3" in full_command[i]:
+                    # Lightweight components use Shell to call Python. So we convert the path to POSIX.
+                    # The simple, but less robust alternative is: `python_path = "python"`
+                    python_path = pathlib.Path(sys.executable).as_posix()
+                    full_command[i] = full_command[i].replace("python3", python_path)
                     break
 
             subprocess.run(full_command, check=True)
