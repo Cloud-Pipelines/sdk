@@ -100,13 +100,15 @@ def _python_function_name_to_component_name(name):
 def strip_type_hints(source_code: str) -> str:
     try:
         return _strip_type_hints_using_lib2to3(source_code)
+    except ImportError:
+        pass
     except Exception as ex:
-        print("Error when stripping type annotations: " + str(ex))
+        warnings.warn("Error when stripping type annotations: " + str(ex))
 
     try:
         return _strip_type_hints_using_strip_hints(source_code)
     except Exception as ex:
-        print("Error when stripping type annotations: " + str(ex))
+        warnings.warn("Error when stripping type annotations: " + str(ex))
 
     return source_code
 
