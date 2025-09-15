@@ -288,55 +288,6 @@ class PythonOpTestCase(unittest.TestCase):
 
         component_spec = _lightweight._extract_component_interface(my_func)
 
-        self.assertEqual(
-            component_spec.inputs,
-            [
-                structures.InputSpec(name="required_param"),
-                structures.InputSpec(
-                    name="int_param", type="Integer", default="42", optional=True
-                ),
-                structures.InputSpec(
-                    name="float_param", type="Float", default="3.14", optional=True
-                ),
-                structures.InputSpec(
-                    name="str_param", type="String", default="string", optional=True
-                ),
-                structures.InputSpec(
-                    name="bool_param", type="Boolean", default="True", optional=True
-                ),
-                structures.InputSpec(
-                    name="none_param", optional=True
-                ),  # No default='None'
-                structures.InputSpec(
-                    name="optional_str_param", type="String", optional=True
-                ),
-                structures.InputSpec(
-                    name="custom_type_param", type="Custom type", optional=True
-                ),
-                structures.InputSpec(
-                    name="custom_struct_type_param",
-                    type={"CustomType": {"param1": "value1", "param2": "value2"}},
-                    optional=True,
-                ),
-            ],
-        )
-        self.assertEqual(
-            component_spec.outputs,
-            [
-                structures.OutputSpec(name="int_param", type="Integer"),
-                structures.OutputSpec(name="float_param", type="Float"),
-                structures.OutputSpec(name="str_param", type="String"),
-                structures.OutputSpec(name="bool_param", type="Boolean"),
-                # structures.OutputSpec(name='custom_type_param', type='Custom type', default='None'),
-                structures.OutputSpec(name="custom_type_param", type="CustomType"),
-                # TODO: Implement this behavior
-                # structures.OutputSpec(
-                #     name="custom_struct_type_param",
-                #     type={"CustomType": {"param1": "value1", "param2": "value2"}},
-                # ),
-            ],
-        )
-
         self.maxDiff = None
         self.assertDictEqual(
             component_spec.to_dict(),
