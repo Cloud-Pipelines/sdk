@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+import typing
 from typing import Callable, NamedTuple, Optional, Sequence
 
 from cloud_pipelines import components
@@ -260,6 +261,14 @@ class PythonOpTestCase(unittest.TestCase):
             bool_param: bool = True,
             none_param=None,
             optional_str_param: Optional[str] = None,  # typing.Union[str, None] = same
+            list_param: list = [],
+            list_str_param: list[str] = [],
+            typing_list_param: typing.List = [],
+            typing_list_str_param: typing.List[str] = [],
+            dict_param: dict = {},
+            dict_str_any_param: dict[str, typing.Any] = {},
+            typing_dict_param: typing.Dict = {},
+            typing_dict_str_any_param: typing.Dict[str, typing.Any] = {},
             custom_type_param: "Custom type" = None,
             custom_struct_type_param: {
                 "CustomType": {"param1": "value1", "param2": "value2"}
@@ -324,6 +333,54 @@ class PythonOpTestCase(unittest.TestCase):
                     {
                         "name": "optional_str_param",
                         "type": "String",
+                        "optional": True,
+                    },
+                    {
+                        "name": "list_param",
+                        "type": "JsonArray",
+                        "default": "[]",
+                        "optional": True,
+                    },
+                    {
+                        "name": "list_str_param",
+                        "type": "JsonArray",
+                        "default": "[]",
+                        "optional": True,
+                    },
+                    {
+                        "name": "typing_list_param",
+                        "type": "JsonArray",
+                        "default": "[]",
+                        "optional": True,
+                    },
+                    {
+                        "name": "typing_list_str_param",
+                        "type": "JsonArray",
+                        "default": "[]",
+                        "optional": True,
+                    },
+                    {
+                        "name": "dict_param",
+                        "type": "JsonObject",
+                        "default": "{}",
+                        "optional": True,
+                    },
+                    {
+                        "name": "dict_str_any_param",
+                        "type": "JsonObject",
+                        "default": "{}",
+                        "optional": True,
+                    },
+                    {
+                        "name": "typing_dict_param",
+                        "type": "JsonObject",
+                        "default": "{}",
+                        "optional": True,
+                    },
+                    {
+                        "name": "typing_dict_str_any_param",
+                        "type": "JsonObject",
+                        "default": "{}",
                         "optional": True,
                     },
                     {

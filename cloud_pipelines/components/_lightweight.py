@@ -222,6 +222,23 @@ def _extract_component_interface(func: Callable) -> structures.ComponentSpec:
                         f"Union types other than Optional[T] is not fully supported. Got: {annotation}."
                     )
                     return None
+            # Handling generic types like List[T], Dict[K, V], Optional[T], Union[A, B, C], etc.
+            # We ignore the generic parameters and use the base generic type.
+            # TODO: Move this logic to the _data_passing (serialization) module.
+            elif generic_origin in (
+                list,
+                typing.List,
+                typing.Sequence,
+                typing.MutableSequence,
+            ):
+                return get_canonical_type_struct_for_type(list)
+            elif generic_origin in (
+                dict,
+                typing.Dict,
+                typing.Mapping,
+                typing.MutableMapping,
+            ):
+                return get_canonical_type_struct_for_type(dict)
 
         # Handling typing.ForwardRef("Type_name") (the name was _ForwardRef in python 3.5-3.6)
         elif hasattr(annotation, "__forward_arg__"):
