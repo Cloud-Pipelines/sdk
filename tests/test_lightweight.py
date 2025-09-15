@@ -259,6 +259,7 @@ class PythonOpTestCase(unittest.TestCase):
             str_param: str = "string",
             bool_param: bool = True,
             none_param=None,
+            optional_str_param: Optional[str] = None,  # typing.Union[str, None] = same
             custom_type_param: "Custom type" = None,
             custom_struct_type_param: {
                 "CustomType": {"param1": "value1", "param2": "value2"}
@@ -306,6 +307,9 @@ class PythonOpTestCase(unittest.TestCase):
                 structures.InputSpec(
                     name="none_param", optional=True
                 ),  # No default='None'
+                structures.InputSpec(
+                    name="optional_str_param", type="String", optional=True
+                ),
                 structures.InputSpec(
                     name="custom_type_param", type="Custom type", optional=True
                 ),
@@ -366,6 +370,11 @@ class PythonOpTestCase(unittest.TestCase):
                         "optional": True,
                     },
                     {"name": "none_param", "optional": True},  # No default='None'
+                    {
+                        "name": "optional_str_param",
+                        "type": "String",
+                        "optional": True,
+                    },
                     {
                         "name": "custom_type_param",
                         "type": "Custom type",

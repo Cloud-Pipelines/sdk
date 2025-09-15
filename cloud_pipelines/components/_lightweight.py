@@ -1,5 +1,6 @@
 import inspect
 import textwrap
+import typing
 from typing import Callable, Dict, List, Optional, TypeVar
 import warnings
 
@@ -209,6 +210,19 @@ def _extract_component_interface(func: Callable) -> structures.ComponentSpec:
             if type_struct:
                 return type_struct
             type_name = str(annotation.__name__)
+        if generic_origin := typing.get_origin(annotation):
+            # Handling Optional[T] (== Union[T, None])
+            if generic_origin is typing.Union:
+                generic_args = typing.get_args(annotation)
+                if len(generic_args) == 2 and type(None) in generic_args:
+                    non_none_type = generic_args[0] or generic_args[1]
+                    return annotation_to_type_struct(non_none_type)
+                else:
+                    warnings.warn(
+                        f"Union types other than Optional[T] is not fully supported. Got: {annotation}."
+                    )
+                    return None
+
         # Handling typing.ForwardRef("Type_name") (the name was _ForwardRef in python 3.5-3.6)
         elif hasattr(annotation, "__forward_arg__"):
             type_name = str(annotation.__forward_arg__)
