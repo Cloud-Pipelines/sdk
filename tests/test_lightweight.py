@@ -316,7 +316,29 @@ class PythonOpTestCase(unittest.TestCase):
                 # ),  # TypeError: NamedTuple('Name', [(f0, t0), (f1, t1), ...]); each t must be a type Got {'CustomType': {'param1': 'value1', 'param2': 'value2'}}
             ],
         ):
-            """Function docstring"""
+            """Function docstring
+
+            Args:
+                required_param: Description
+                    for
+                    required_param
+                int_param: Description for int_param
+                float_param: Description for float_param
+                str_param: Description for str_param
+                bool_param: Description for bool_param
+                none_param: Description for none_param
+                optional_str_param: Description for optional_str_param
+                list_param: Description for list_param
+                list_str_param: Description for list_str_param
+                typing_list_param: Description for typing_list_param
+                typing_list_str_param: Description for typing_list_str_param
+                dict_param: Description for dict_param
+                dict_str_any_param: Description for dict_str_any_param
+                typing_dict_param: Description for typing_dict_param
+                typing_dict_str_any_param: Description for typing_dict_str_any_param
+                custom_type_param: Description for custom_type_param
+                custom_struct_type_param: Description for custom_struct_type_param
+            """
             pass
 
         component_spec = _lightweight._extract_component_interface(my_func)
@@ -328,89 +350,111 @@ class PythonOpTestCase(unittest.TestCase):
                 "name": "My func",
                 "description": "Function docstring",
                 "inputs": [
-                    {"name": "required_param"},
+                    {
+                        "name": "required_param",
+                        "description": "Description\nfor\nrequired_param",
+                    },
                     {
                         "name": "int_param",
                         "type": "Integer",
                         "default": "42",
                         "optional": True,
+                        "description": "Description for int_param",
                     },
                     {
                         "name": "float_param",
                         "type": "Float",
                         "default": "3.14",
                         "optional": True,
+                        "description": "Description for float_param",
                     },
                     {
                         "name": "str_param",
                         "type": "String",
                         "default": "string",
                         "optional": True,
+                        "description": "Description for str_param",
                     },
                     {
                         "name": "bool_param",
                         "type": "Boolean",
                         "default": "True",
                         "optional": True,
+                        "description": "Description for bool_param",
                     },
-                    {"name": "none_param", "optional": True},  # No default='None'
+                    {
+                        "name": "none_param",
+                        "optional": True,
+                        # No default='None'
+                        "description": "Description for none_param",
+                    },
                     {
                         "name": "optional_str_param",
                         "type": "String",
                         "optional": True,
+                        "description": "Description for optional_str_param",
                     },
                     {
                         "name": "list_param",
                         "type": "JsonArray",
                         "default": "[]",
                         "optional": True,
+                        "description": "Description for list_param",
                     },
                     {
                         "name": "list_str_param",
                         "type": "JsonArray",
                         "default": "[]",
                         "optional": True,
+                        "description": "Description for list_str_param",
                     },
                     {
                         "name": "typing_list_param",
                         "type": "JsonArray",
                         "default": "[]",
                         "optional": True,
+                        "description": "Description for typing_list_param",
                     },
                     {
                         "name": "typing_list_str_param",
                         "type": "JsonArray",
                         "default": "[]",
                         "optional": True,
+                        "description": "Description for typing_list_str_param",
                     },
                     {
                         "name": "dict_param",
                         "type": "JsonObject",
                         "default": "{}",
                         "optional": True,
+                        "description": "Description for dict_param",
                     },
                     {
                         "name": "dict_str_any_param",
                         "type": "JsonObject",
                         "default": "{}",
                         "optional": True,
+                        "description": "Description for dict_str_any_param",
                     },
                     {
                         "name": "typing_dict_param",
                         "type": "JsonObject",
                         "default": "{}",
                         "optional": True,
+                        "description": "Description for typing_dict_param",
                     },
                     {
                         "name": "typing_dict_str_any_param",
                         "type": "JsonObject",
                         "default": "{}",
                         "optional": True,
+                        "description": "Description for typing_dict_str_any_param",
                     },
                     {
                         "name": "custom_type_param",
                         "type": "Custom type",
                         "optional": True,
+                        "description": "Description for custom_type_param",
                     },
                     {
                         "name": "custom_struct_type_param",
@@ -418,6 +462,7 @@ class PythonOpTestCase(unittest.TestCase):
                             "CustomType": {"param1": "value1", "param2": "value2"}
                         },
                         "optional": True,
+                        "description": "Description for custom_struct_type_param",
                     },
                 ],
                 "outputs": [
