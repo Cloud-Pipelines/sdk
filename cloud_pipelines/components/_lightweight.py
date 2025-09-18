@@ -330,14 +330,18 @@ def _extract_component_interface(func: Callable) -> structures.ComponentSpec:
 
     # Analyzing the return type annotations.
     return_ann = signature.return_annotation
-    if hasattr(return_ann, "_fields"):  # NamedTuple
+    # Handling typing.NamedTuple and typing.TypedDict
+    if hasattr(return_ann, "_fields") or hasattr(return_ann, "__required_keys__"):
         # Getting field type annotations.
         # __annotations__ does not exist in python 3.5 and earlier
         # _field_types does not exist in python 3.9 and later
         field_annotations = getattr(return_ann, "__annotations__", None) or getattr(
             return_ann, "_field_types", None
         )
-        for field_name in return_ann._fields:
+        field_names = (
+            getattr(return_ann, "_fields", None) or return_ann.__annotations__.keys()
+        )
+        for field_name in field_names:
             type_struct = None
             if field_annotations:
                 type_struct = annotation_to_type_struct(
@@ -595,8 +599,23 @@ def _create_component_spec_from_func(
         and return_ann != inspect.Parameter.empty
         and not isinstance(return_ann, dict)
         and not hasattr(return_ann, "_fields")  # namedtuple
+        and not hasattr(return_ann, "__required_keys__")  # typing.TypedDict
     ):
         outputs_to_list_code = "_outputs = [_outputs]"
+
+    if hasattr(return_ann, "__required_keys__"):  # typing.TypedDict
+        # outputs_to_list_code = "_outputs = [_outputs]"
+        # outputs_to_list_code = "_outputs = [_outputs[key] for key in " + repr([output.name for output in outputs_passed_through_func_return_tuple]) + "]"
+        outputs_to_list_code = (
+            "_outputs = [\n"
+            + "".join(
+                [
+                    "    _outputs[" + repr(output.name) + "],\n"
+                    for output in outputs_passed_through_func_return_tuple
+                ]
+            )
+            + "]"
+        )
 
     output_serialization_code = "".join(
         f"    {s},\n" for s in output_serialization_expression_strings

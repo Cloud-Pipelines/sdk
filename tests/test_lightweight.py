@@ -54,6 +54,8 @@ class PythonOpTestCase(unittest.TestCase):
         expected = func(arguments[0], arguments[1])
         if isinstance(expected, tuple):
             expected = expected[0]
+        elif isinstance(expected, dict):
+            expected = list(expected.values())[0]
         expected_str = str(expected)
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
@@ -90,9 +92,15 @@ class PythonOpTestCase(unittest.TestCase):
         arg1 = float(3)
         arg2 = float(5)
 
-        expected_tuple = func(arg1, arg2)
-        expected1_str = str(expected_tuple[0])
-        expected2_str = str(expected_tuple[1])
+        expected_result = func(arg1, arg2)
+        if isinstance(expected_result, tuple):
+            expected1_str = str(expected_result[0])
+            expected2_str = str(expected_result[1])
+        elif isinstance(expected_result, dict):
+            expected1_str = str(expected_result[output_names[0]])
+            expected2_str = str(expected_result[output_names[1]])
+        else:
+            raise TypeError(f"Unsupported function return type {type(expected_result)}")
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
             with components_override_input_output_dirs_context(
@@ -250,6 +258,22 @@ class PythonOpTestCase(unittest.TestCase):
             func, op, output_names=["sum", "product"]
         )
 
+    def test_create_component_from_func_that_returns_typed_dict(
+        self,
+    ):
+        def add_and_multiply_two_numbers(
+            a: float, b: float
+        ) -> typing.TypedDict("DummyName", {"sum": float, "product": float}):
+            """Returns sum and product of two arguments"""
+            return {"sum": a + b, "product": a * b}
+
+        func = add_and_multiply_two_numbers
+        op = components.create_component_from_func(func)
+
+        self.helper_test_2_in_2_out_component_using_local_call(
+            func, op, output_names=["sum", "product"]
+        )
+
     def test_extract_component_interface(self):
         from typing import NamedTuple
 
@@ -396,6 +420,46 @@ class PythonOpTestCase(unittest.TestCase):
                         "optional": True,
                     },
                 ],
+                "outputs": [
+                    {"name": "int_param", "type": "Integer"},
+                    {"name": "float_param", "type": "Float"},
+                    {"name": "str_param", "type": "String"},
+                    {"name": "bool_param", "type": "Boolean"},
+                    {"name": "custom_type_param", "type": "CustomType"},
+                    # {'name': 'custom_struct_type_param', 'type': {'CustomType': {'param1': 'value1', 'param2': 'value2'}}, 'optional': True},
+                ],
+            },
+        )
+
+    def test_extract_component_interface_from_function_that_returns_typed_dict(self):
+        from typing import NamedTuple
+
+        def my_func() -> (
+            typing.TypedDict(
+                "DummyName",
+                {
+                    # "required_param": None
+                    "int_param": int,
+                    "float_param": float,
+                    "str_param": str,
+                    "bool_param": bool,
+                    "custom_type_param": "CustomType",
+                    # (
+                    #     "custom_struct_type_param",
+                    #     {"CustomType": {"param1": "value1", "param2": "value2"}},
+                    # ),  # TypeError: NamedTuple('Name', [(f0, t0), (f1, t1), ...]); each t must be a type Got {'CustomType': {'param1': 'value1', 'param2': 'value2'}}
+                },
+            )
+        ):
+            pass
+
+        component_spec = _lightweight._extract_component_interface(my_func)
+
+        self.maxDiff = None
+        self.assertDictEqual(
+            component_spec.to_dict(),
+            {
+                "name": "My func",
                 "outputs": [
                     {"name": "int_param", "type": "Integer"},
                     {"name": "float_param", "type": "Float"},
