@@ -318,6 +318,8 @@ class PythonOpTestCase(unittest.TestCase):
         ):
             """Function docstring
 
+            Detailed description.
+
             Args:
                 required_param: Description
                     for
@@ -348,7 +350,7 @@ class PythonOpTestCase(unittest.TestCase):
             component_spec.to_dict(),
             {
                 "name": "My func",
-                "description": "Function docstring",
+                "description": "Function docstring\n\nDetailed description.",
                 "inputs": [
                     {
                         "name": "required_param",

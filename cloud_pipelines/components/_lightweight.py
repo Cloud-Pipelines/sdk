@@ -397,7 +397,7 @@ def _extract_component_interface(func: Callable) -> structures.ComponentSpec:
     ) or _python_function_name_to_component_name(func.__name__)
     description = (
         getattr(func, "_component_description", None)
-        or parsed_docstring.short_description
+        or parsed_docstring.description
     )
     if description:
         description = description.strip()

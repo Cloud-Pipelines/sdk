@@ -138,7 +138,7 @@ tests = [
 [package.metadata]
 requires-dist = [
     { name = "docker", specifier = ">=4.4.0,<7.0.0" },
-    { name = "docstring-parser" },
+    { name = "docstring-parser", specifier = ">=0.16" },
     { name = "isodate", specifier = "~=0.6.1" },
     { name = "mock", marker = "extra == 'tests'" },
     { name = "pyyaml" },
