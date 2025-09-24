@@ -1,6 +1,6 @@
 [project]
 name = "cloud-pipelines"
-version = "0.25.07.07"
+version = "0.25.9.23"
 description = "SDK for Cloud Pipelines"
 authors = [
     {name = "Alexey Volkov", email = "alexey.volkov@ark-kun.com"},
