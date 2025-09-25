@@ -42,6 +42,7 @@ issues = "https://github.com/Cloud-Pipelines/sdk/issues"
 
 [project.optional-dependencies]
 tests = [
+    "kubernetes>=33.1.0",
     "mock",
 ]
 
