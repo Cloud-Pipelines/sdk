@@ -119,7 +119,7 @@ class UriAccessor(_UriAccessorBase):
 
 class StorageProvider(abc.ABC):
     @abc.abstractmethod
-    def make_uri(self, **kwargs) -> UriAccessor:
+    def make_uri(self, *args, **kwargs) -> UriAccessor:
         raise NotImplementedError
 
     @abc.abstractmethod
