@@ -38,7 +38,7 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
     def upload(self, source_path: str, destination_uri: GoogleCloudStorageUri):
         # TODO: Upload to temporary dir then rename
         destination_uri_str = destination_uri.uri
-        _LOGGER.debug(f"Downloading from {source_path} to {destination_uri_str}")
+        _LOGGER.debug(f"Uploading from {source_path} to {destination_uri_str}")
         self._upload_to_uri(
             source_path=source_path, destination_uri=destination_uri_str
         )

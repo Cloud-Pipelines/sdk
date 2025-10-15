@@ -35,7 +35,7 @@ class LocalStorageProvider(interfaces.StorageProvider):
     def upload(self, source_path: str, destination_uri: LocalUri):
         destination_path = pathlib.Path(destination_uri.path)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
-        _LOGGER.debug(f"Downloading from {source_path} to {destination_path}")
+        _LOGGER.debug(f"Uploading from {source_path} to {destination_path}")
         if not os.path.islink(source_path) and os.path.isdir(source_path):
             shutil.copytree(source_path, destination_path, symlinks=True)
         else:
