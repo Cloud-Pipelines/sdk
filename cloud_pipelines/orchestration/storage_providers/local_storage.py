@@ -17,6 +17,10 @@ _DATA_HASHES = ["md5", "sha256"]
 class LocalUri(interfaces.DataUri):
     path: str
 
+    @classmethod
+    def parse(cls, uri_string: str) -> "LocalUri":
+        return LocalUri(path=uri_string)
+
     def join_path(self, relative_path: str) -> "LocalUri":
         new_path = os.path.join(self.path, relative_path)
         return LocalUri(path=new_path)
@@ -28,7 +32,7 @@ LocalUri._register_subclass("local")
 class LocalStorageProvider(interfaces.StorageProvider):
     def make_uri(self, path: str) -> interfaces.UriAccessor:
         return interfaces.UriAccessor(
-            uri=LocalUri(path=path),
+            uri=LocalUri.parse(path),
             provider=self,
         )
 

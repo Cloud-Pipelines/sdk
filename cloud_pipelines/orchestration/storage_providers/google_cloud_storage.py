@@ -15,6 +15,12 @@ _LOGGER = logging.getLogger(name=__name__)
 class GoogleCloudStorageUri(interfaces.DataUri):
     uri: str
 
+    @classmethod
+    def parse(cls, uri_string: str) -> "GoogleCloudStorageUri":
+        # Validating the URI
+        storage.Blob.from_string(uri_string)
+        return GoogleCloudStorageUri(uri=uri_string)
+
     def join_path(self, relative_path: str) -> "GoogleCloudStorageUri":
         new_uri = self.uri.rstrip("/") + "/" + relative_path
         return GoogleCloudStorageUri(uri=new_uri)
@@ -28,10 +34,8 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
         self._client = client or storage.Client()
 
     def make_uri(self, uri: str) -> interfaces.UriAccessor:
-        # Validating the URI
-        storage.Blob.from_string(uri)
         return interfaces.UriAccessor(
-            uri=GoogleCloudStorageUri(uri=uri),
+            uri=GoogleCloudStorageUri.parse(uri),
             provider=self,
         )
 

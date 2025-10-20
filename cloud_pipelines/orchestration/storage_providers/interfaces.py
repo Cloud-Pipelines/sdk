@@ -19,6 +19,11 @@ class DataUri(abc.ABC):
     _type_name_to_type_map: Dict[str, Type["DataUri"]] = {}
     _type_to_type_name_map: Dict[Type["DataUri"], str] = {}
 
+    @classmethod
+    @abc.abstractmethod
+    def parse(cls, uri_string: str) -> "DataUri":
+        raise NotImplementedError
+
     @abc.abstractmethod
     def join_path(self, relative_path: str) -> "DataUri":
         raise NotImplementedError
