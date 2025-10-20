@@ -36,6 +36,12 @@ class LocalStorageProvider(interfaces.StorageProvider):
             provider=self,
         )
 
+    def parse_uri_get_accessor(self, uri_string: str) -> interfaces.UriAccessor:
+        return interfaces.UriAccessor(
+            uri=LocalUri.parse(uri_string),
+            provider=self,
+        )
+
     def upload(self, source_path: str, destination_uri: LocalUri):
         destination_path = pathlib.Path(destination_uri.path)
         destination_path.parent.mkdir(parents=True, exist_ok=True)

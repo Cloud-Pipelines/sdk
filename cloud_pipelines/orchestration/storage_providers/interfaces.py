@@ -128,6 +128,10 @@ class StorageProvider(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
+    def parse_uri_get_accessor(self, uri_string: str) -> UriAccessor:
+        raise NotImplementedError
+
+    @abc.abstractmethod
     def upload(self, source_path: str, destination_uri: DataUri) -> None:
         raise NotImplementedError
 

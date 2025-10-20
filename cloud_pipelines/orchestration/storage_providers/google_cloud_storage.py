@@ -39,6 +39,12 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
             provider=self,
         )
 
+    def parse_uri_get_accessor(self, uri_string: str) -> interfaces.UriAccessor:
+        return interfaces.UriAccessor(
+            uri=GoogleCloudStorageUri.parse(uri_string),
+            provider=self,
+        )
+
     def upload(self, source_path: str, destination_uri: GoogleCloudStorageUri):
         # TODO: Upload to temporary dir then rename
         destination_uri_str = destination_uri.uri
