@@ -674,7 +674,7 @@ _outputs = {func_name}(**_parsed_args)
         package_preinstallation_command = [
             "sh",
             "-c",
-            f'({package_install_command_line} || {package_install_command_line} --user) && "$0" "$@"',
+            f'({package_install_command_line} || {package_install_command_line} --user) && exec "$0" "$@"',
         ]
 
     component_spec.implementation = structures.ContainerImplementation(
@@ -690,7 +690,7 @@ _outputs = {func_name}(**_parsed_args)
                     """\
                     program_path=$(mktemp)
                     printf "%s" "$0" > "$program_path"
-                    python3 -u "$program_path" "$@"
+                    exec python3 -u "$program_path" "$@"
                 """
                 ),
                 full_source,
