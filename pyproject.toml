@@ -10,10 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML",
-    "docker >=4.4.0, <7.0.0",
+    "docker~=7.1.0",
     "docstring-parser>=0.16",
     "isodate ~= 0.6.1",
-    "requests < 2.32.0",
     "strip-hints >= 0.1.8",
 ]
 classifiers = [
