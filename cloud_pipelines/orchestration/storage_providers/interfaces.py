@@ -2,6 +2,7 @@ import abc
 import dataclasses
 import hashlib
 import json
+import logging
 import tempfile
 from typing import Dict, Sequence, Type
 
@@ -13,6 +14,10 @@ __all__ = [
     "UriAccessor",
     "StorageProvider",
 ]
+
+_DEFAULT_HASH_ALGO = "sha256"
+
+_logger = logging.getLogger(__name__)
 
 
 class DataUri(abc.ABC):
@@ -177,14 +182,50 @@ class _FileInfo:
 
 
 def _make_data_info_for_dir(file_info_list: Sequence[_FileInfo]) -> DataInfo:
+    if not file_info_list:
+        return DataInfo(total_size=0, is_dir=True, hashes={})
+
     total_size = sum(file_info.size for file_info in file_info_list)
-    hash_names = list(file_info_list[0].hashes.keys())
+
+    # We want to compute directory hashes based on the file hashes.
+    # Each FileInfo entry may have multiple hashes.
+    # Some hashes might be missing on some files. For example, GCS composite objects lack MD5 hash.
+    # We need hashes of all files to calculate the directory hash.
+    # So we have to be careful not to use hashes that do not have full coverage.
+    hash_counts: dict[str, int] = (
+        {}
+    )  # Not using `set` since I want to preserve the hash order.
+    for file_info in file_info_list:
+        for hash_name in file_info.hashes:
+            hash_counts[hash_name] = hash_counts.get(hash_name, 0) + 1
+
+    hashes_with_full_coverage = [
+        hash_name
+        for hash_name, hash_count in hash_counts.items()
+        if hash_count == len(file_info_list)
+    ]
+    if len(hashes_with_full_coverage) != len(hash_counts):
+        _logger.warning(
+            f"_make_data_info_for_dir: Some hashes do are not present for all {len(file_info_list)} files: {hash_counts=}. {hashes_with_full_coverage=}"
+        )
+
     # Stable sorting the files
     sorted_file_info_list = sorted(
         file_info_list, key=lambda info: info.path.encode("utf-8")
     )
     result_hashes = {}
-    for hash_name in hash_names:
+    for hash_name in hashes_with_full_coverage:
+        # Some hashes like "crc32" are not available from hashlib. Replacing them with a supported algorithm.
+        # Actually, we do not need to calculate directory hash using same hashing algorithm. We can use same algorithm for everything, but that would be a breaking change.
+        # So, for now we only do this for hashes that are not available in hashlib, resulting in directory hashes like "crc32c-dir-sha256".
+        # Maybe in the future we can standardize on the new directory hash names while keeping backwards compatible results (return multiple hashes).
+        if hash_name in hashlib.algorithms_available:
+            dir_hash_name = hash_name
+            hash_algo = hash_name
+        else:
+            dir_hash_name = f"{hash_name}-dir-{_DEFAULT_HASH_ALGO}"
+            hash_algo = _DEFAULT_HASH_ALGO
+
         # Structure that will be hashed
         file_info_dicts = [
             {
@@ -197,7 +238,7 @@ def _make_data_info_for_dir(file_info_list: Sequence[_FileInfo]) -> DataInfo:
         ]
         file_info_dicts_string = json.dumps(file_info_dicts)
         file_info_dicts_string_hash = hashlib.new(
-            name=hash_name, data=file_info_dicts_string.encode("utf-8")
+            name=hash_algo, data=file_info_dicts_string.encode("utf-8")
         ).hexdigest()
-        result_hashes[hash_name.lower()] = file_info_dicts_string_hash
+        result_hashes[dir_hash_name.lower()] = file_info_dicts_string_hash
     return DataInfo(total_size=total_size, is_dir=True, hashes=result_hashes)
