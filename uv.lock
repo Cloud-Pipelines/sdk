@@ -83,7 +83,7 @@ wheels = [
 
 [[package]]
 name = "cloud-pipelines"
-version = "0.26.3.12"
+version = "0.26.7.29"
 source = { editable = "." }
 dependencies = [
     { name = "docker" },
