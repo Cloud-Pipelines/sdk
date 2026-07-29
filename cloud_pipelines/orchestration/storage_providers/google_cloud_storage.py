@@ -148,8 +148,7 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
             return interfaces.DataInfo(
                 total_size=blob.size,
                 is_dir=False,
-                # blob.md5_hash is a base64-encoded hash digest byte array. E.g. "1B2M2Y8AsgTpgAmY7PhCfg=="
-                hashes={"md5": base64.decodebytes(blob.md5_hash.encode("ascii")).hex()},
+                hashes=_get_gcs_blob_hashes(blob),
             )
         else:
             # Note: Each empty dir root is represented as a 0-byte object with trailing slash:
@@ -166,14 +165,22 @@ class GoogleCloudStorageProvider(interfaces.StorageProvider):
                     interfaces._FileInfo(
                         path=relative_source_blob_name,
                         size=blob.size,
-                        hashes={
-                            # blob.md5_hash is a base64-encoded hash digest byte array. E.g. "1B2M2Y8AsgTpgAmY7PhCfg=="
-                            "md5": base64.decodebytes(
-                                blob.md5_hash.encode("ascii")
-                            ).hex()
-                        },
+                        hashes=_get_gcs_blob_hashes(blob),
                     )
                 )
             data_info = interfaces._make_data_info_for_dir(file_info_list)
             data_info._file_info_list = file_info_list
             return data_info
+
+
+def _get_gcs_blob_hashes(blob: storage.Blob) -> dict[str, str]:
+    hashes = {}
+    # Note: Composite GCS objects do not have MD5 hash metadata.
+    # See: https://docs.cloud.google.com/storage/docs/composite-objects#metadata
+    if blob.md5_hash:
+        # blob.md5_hash is a base64-encoded hash digest byte array. E.g. "1B2M2Y8AsgTpgAmY7PhCfg=="
+        hashes["md5"] = base64.decodebytes(blob.md5_hash.encode("ascii")).hex()
+    if blob.crc32c:
+        # blob.crc32c is a base64-encoded hash digest byte array. E.g. "4gcgLQ=="
+        hashes["crc32c"] = base64.decodebytes(blob.crc32c.encode("ascii")).hex()
+    return hashes
